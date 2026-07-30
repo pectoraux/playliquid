@@ -9,22 +9,40 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Activity,
   AlertCircle,
+  AlertTriangle,
   ArrowRight,
   ArrowDown,
+  BarChart3,
+  Bell,
   Boxes,
   CheckCircle2,
   Database,
+  DatabaseBackup,
+  ExternalLink,
+  Flag,
+  Gauge,
   GitBranch,
   Layers,
+  LifeBuoy,
   Loader2,
+  Lock,
+  Mail,
+  MessageSquare,
   RefreshCw,
   Server,
+  ServerCog,
+  Settings,
   Shield,
+  ShieldAlert,
   Terminal,
+  Trash2,
+  Webhook,
   Zap,
   Radio,
   Cpu,
@@ -38,6 +56,8 @@ import {
   CircleDot,
   Clock,
   Plug,
+  KeyRound,
+  Plus,
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -103,6 +123,54 @@ interface ProjectionsResponse {
   processed: number
 }
 
+interface WorkerHealth {
+  name: string
+  running: boolean
+  lastRunAt: number | null
+  lastError: string | null
+  totalProcessed: number
+  totalErrors: number
+  avgDurationMs: number
+}
+
+interface WorkerHealthResponse {
+  workers: WorkerHealth[]
+}
+
+type FlagType =
+  | 'boolean'
+  | 'percentage'
+  | 'country'
+  | 'region'
+  | 'user'
+  | 'organization'
+  | 'time-window'
+  | 'kill-switch'
+
+interface FeatureFlag {
+  key: string
+  type: FlagType
+  enabled: boolean
+  percentage?: number
+  allowedCountries?: string[]
+  allowedRegions?: string[]
+  allowedUsers?: string[]
+  allowedOrganizations?: string[]
+  startAt?: number
+  endAt?: number
+  description?: string
+  updatedAt?: number
+}
+
+interface FeatureFlagListResponse {
+  flags: FeatureFlag[]
+}
+
+interface EvaluationResult {
+  enabled: boolean
+  reason: string
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const ARCHITECTURE_LAYERS = [
@@ -162,7 +230,108 @@ const COMPONENT_ICONS: Record<string, React.ComponentType<{ className?: string }
   'event-bus': Radio,
   outbox: Inbox,
   cache: Cpu,
+  redis: Database,
+  'projection-engine': GitBranch,
+  workers: Workflow,
+  queue: Inbox,
+  storage: HardDrive,
+  scheduler: Clock,
+  'circuit-breakers': ShieldAlert,
+  'rate-limiter': Gauge,
 }
+
+type PlatformServiceEntry = {
+  name: string
+  description: string
+  icon: React.ComponentType<{ className?: string }>
+}
+
+type PlatformServiceGroup = {
+  name: string
+  icon: React.ComponentType<{ className?: string }>
+  accent: 'emerald' | 'cyan'
+  services: PlatformServiceEntry[]
+}
+
+const PLATFORM_SERVICE_GROUPS: PlatformServiceGroup[] = [
+  {
+    name: 'Caching & Resilience',
+    icon: Zap,
+    accent: 'emerald',
+    services: [
+      { name: 'Redis Platform', description: 'Cache, pub/sub, locks, sessions, rate limiter.', icon: Database },
+      { name: 'Cache Framework', description: 'MemoryCache + RedisCache, tag-based invalidation.', icon: Cpu },
+      { name: 'Distributed Locks', description: 'acquire, renew, release, executeWithLock.', icon: Lock },
+      { name: 'Retry Framework', description: 'immediate, linear, exponential, exponential+jitter.', icon: RefreshCw },
+      { name: 'Circuit Breakers', description: 'closed, open, half-open states.', icon: ShieldAlert },
+    ],
+  },
+  {
+    name: 'Messaging & Workers',
+    icon: Radio,
+    accent: 'cyan',
+    services: [
+      { name: 'Message Queue', description: 'InMemory + Redis, publish/consume/ack/nack.', icon: Inbox },
+      { name: 'Dead Letter Queue', description: 'retry, poison detection, replay.', icon: AlertTriangle },
+      { name: 'Worker Framework', description: 'Outbox, Projection, Cleanup, Analytics workers.', icon: Workflow },
+      { name: 'Scheduler', description: 'cron, fixed-rate, one-time, priority jobs.', icon: Clock },
+    ],
+  },
+  {
+    name: 'Storage & Search',
+    icon: HardDrive,
+    accent: 'emerald',
+    services: [
+      { name: 'File Storage', description: 'Local + S3, upload/download/signedUrl.', icon: HardDrive },
+      { name: 'CDN Integration', description: 'versioning, invalidation, signed URLs.', icon: Cloud },
+      { name: 'Search', description: 'InMemory inverted index, filters, facets, highlights.', icon: Search },
+    ],
+  },
+  {
+    name: 'Platform Services',
+    icon: Settings,
+    accent: 'cyan',
+    services: [
+      { name: 'Feature Flags', description: 'boolean, percentage, country, user, kill-switch.', icon: Flag },
+      { name: 'Secret Management', description: 'env provider, chained, rotation.', icon: KeyRound },
+      { name: 'Configuration Service', description: 'runtime overrides, reload, validation.', icon: Settings },
+      { name: 'Rate Limiting', description: 'sliding-window, token-bucket, IP/user/route.', icon: Gauge },
+    ],
+  },
+  {
+    name: 'Notifications',
+    icon: Bell,
+    accent: 'emerald',
+    services: [
+      { name: 'Email', description: 'Console + SMTP, circuit-breaker protected.', icon: Mail },
+      { name: 'SMS', description: 'Console + Twilio.', icon: MessageSquare },
+      { name: 'Push', description: 'Console + FCM, device registration.', icon: Bell },
+      { name: 'Webhooks', description: 'HMAC-SHA256, retries, DLQ, replay protection.', icon: Webhook },
+      { name: 'Sessions', description: 'JWT HS256, refresh tokens, revocation.', icon: KeyRound },
+    ],
+  },
+  {
+    name: 'Operations',
+    icon: Activity,
+    accent: 'cyan',
+    services: [
+      { name: 'Metrics', description: 'Prometheus-compatible, counters/gauges/histograms.', icon: BarChart3 },
+      { name: 'Extended Health', description: '13 infrastructure checks, parallel, TTL-cached.', icon: Activity },
+      { name: 'Backup Framework', description: 'database, storage, config, secrets-metadata.', icon: DatabaseBackup },
+      { name: 'Disaster Recovery', description: 'recovery mode, maintenance mode, startup recovery.', icon: LifeBuoy },
+      { name: 'Performance', description: 'compression, ETags, streaming, slow query detection.', icon: Gauge },
+      { name: 'Production Operations', description: 'startup validation, graceful shutdown, readiness gates.', icon: ServerCog },
+    ],
+  },
+]
+
+const KEY_METRIC_NAMES = [
+  'commands_dispatched_total',
+  'queries_executed_total',
+  'worker_processed_total',
+  'cache_hits_total',
+  'circuit_breaker_state',
+]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -238,6 +407,18 @@ export default function Home() {
           <RegistryDisplay />
           <Separator className="my-12 bg-slate-800" />
           <PipelineVisualization />
+
+          {/* ─── Milestone 2: Production Infrastructure & Platform Services ─── */}
+          <M2SectionBanner />
+          <PlatformServicesGrid />
+          <Separator className="my-12 bg-slate-800" />
+          <ExtendedHealthDashboard />
+          <Separator className="my-12 bg-slate-800" />
+          <WorkerHealthMonitor />
+          <Separator className="my-12 bg-slate-800" />
+          <PrometheusMetrics />
+          <Separator className="my-12 bg-slate-800" />
+          <FeatureFlagsManager />
         </main>
         <Footer />
       </div>
@@ -272,7 +453,9 @@ function Header() {
             playliquid
           </span>
           <span className="text-slate-600">/</span>
-          <span className="text-slate-400">milestone 1</span>
+          <span className="text-slate-400">milestone 1 → 2</span>
+          <span className="text-slate-600">/</span>
+          <span className="text-emerald-400">production infrastructure</span>
         </div>
         <div className="flex flex-col gap-4">
           <h1 className="font-mono text-4xl font-bold tracking-tight text-zinc-50 sm:text-5xl lg:text-6xl">
@@ -298,6 +481,18 @@ function Header() {
             </Badge>
             <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-300">
               Outbox Pattern
+            </Badge>
+            <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/15 text-emerald-300">
+              Redis
+            </Badge>
+            <Badge variant="outline" className="border-cyan-500/40 bg-cyan-500/15 text-cyan-300">
+              Workers
+            </Badge>
+            <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/15 text-emerald-300">
+              Metrics
+            </Badge>
+            <Badge variant="outline" className="border-cyan-500/40 bg-cyan-500/15 text-cyan-300">
+              Feature Flags
             </Badge>
           </div>
         </div>
@@ -1514,23 +1709,27 @@ function Footer() {
           </div>
           <div className="flex flex-col gap-2">
             <p className="font-mono text-[10px] uppercase tracking-widest text-slate-600">
-              Health Endpoints
+              Infrastructure Endpoints
             </p>
             <div className="flex flex-wrap gap-2">
               <FooterLink href="/api/health" label="/api/health" icon={Activity} />
+              <FooterLink href="/api/health/extended" label="/api/health/extended" icon={ShieldAlert} />
               <FooterLink href="/api/ready" label="/api/ready" icon={CheckCircle2} />
               <FooterLink href="/api/live" label="/api/live" icon={Zap} />
+              <FooterLink href="/api/metrics" label="/api/metrics" icon={BarChart3} />
+              <FooterLink href="/api/workers/health" label="/api/workers/health" icon={Workflow} />
+              <FooterLink href="/api/feature-flags" label="/api/feature-flags" icon={Flag} />
             </div>
           </div>
         </div>
         <Separator className="bg-slate-800" />
         <div className="flex flex-col items-center justify-between gap-2 font-mono text-[10px] text-slate-600 sm:flex-row">
           <span>
-            Built with DDD · CQRS · Event Sourcing · Outbox Pattern
+            Milestone 2 · Caching · Messaging · Workers · Storage · Notifications · Operations
           </span>
           <span className="flex items-center gap-1.5">
             <Cloud className="h-3 w-3" />
-            Next.js · TypeScript · Prisma · shadcn/ui
+            Next.js · TypeScript · Prisma · Redis · shadcn/ui
           </span>
         </div>
       </div>
@@ -1555,5 +1754,1235 @@ function FooterLink({
       <Icon className="h-3 w-3" />
       {label}
     </a>
+  )
+}
+
+// ─── M2 Section Banner ───────────────────────────────────────────────────────
+
+function M2SectionBanner() {
+  return (
+    <div className="mt-16 flex flex-col items-start gap-6 rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/5 via-slate-900/40 to-cyan-500/5 p-6 ring-1 ring-inset ring-emerald-500/10 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex items-start gap-4">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-emerald-500/40 bg-emerald-500/10 ring-1 ring-inset ring-emerald-500/20">
+          <Server className="h-6 w-6 text-emerald-400" />
+        </div>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.25em] text-emerald-400/80">
+            <span>milestone 2</span>
+            <span className="text-slate-600">·</span>
+            <span className="text-slate-400">production infrastructure</span>
+          </div>
+          <h2 className="font-mono text-2xl font-bold tracking-tight text-zinc-50 sm:text-3xl">
+            Platform Services & Operations
+          </h2>
+          <p className="max-w-2xl text-sm text-slate-400">
+            Caching, messaging, storage, notifications, and full production
+            operations — extended health probes, Prometheus metrics, worker
+            monitoring, feature flags, backups, and disaster recovery.
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 font-mono text-[10px]">
+        <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
+          Redis
+        </Badge>
+        <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-300">
+          Workers
+        </Badge>
+        <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
+          Metrics
+        </Badge>
+        <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-300">
+          Feature Flags
+        </Badge>
+        <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
+          DR & Backups
+        </Badge>
+      </div>
+    </div>
+  )
+}
+
+// ─── Platform Services Grid ──────────────────────────────────────────────────
+
+function PlatformServicesGrid() {
+  return (
+    <section id="m2-platform" className="scroll-mt-8">
+      <SectionHeading
+        index="06"
+        title="Platform Services"
+        description="Every M2 infrastructure framework, grouped by domain. Each card maps to a production-ready provider with in-memory and external backends."
+        icon={Layers}
+      />
+      <div className="mt-8 space-y-8">
+        {PLATFORM_SERVICE_GROUPS.map((group) => {
+          const GroupIcon = group.icon
+          const accent = accentClasses(group.accent)
+          return (
+            <div key={group.name} className="space-y-3">
+              <div className="flex items-center gap-2">
+                <div
+                  className={`flex h-7 w-7 items-center justify-center rounded-md border ${accent.bg} ${accent.border} ring-1 ring-inset ${accent.ring}`}
+                >
+                  <GroupIcon className={`h-3.5 w-3.5 ${accent.text}`} />
+                </div>
+                <h3 className="font-mono text-sm font-semibold uppercase tracking-wider text-zinc-200">
+                  {group.name}
+                </h3>
+                <Badge
+                  variant="outline"
+                  className="border-slate-700 bg-slate-950/60 font-mono text-[10px] text-slate-400"
+                >
+                  {group.services.length}
+                </Badge>
+                <div className="ml-2 h-px flex-1 bg-gradient-to-r from-slate-800 to-transparent" />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {group.services.map((service) => {
+                  const ServiceIcon = service.icon
+                  return (
+                    <Card
+                      key={service.name}
+                      className="border-slate-800 bg-slate-900/40 py-4 ring-1 ring-inset ring-slate-800/40 transition-colors hover:border-slate-700 hover:bg-slate-900/60"
+                    >
+                      <CardContent className="space-y-2 px-4">
+                        <div className="flex items-center gap-2">
+                          <div
+                            className={`flex h-7 w-7 items-center justify-center rounded-md border ${accent.bg} ${accent.border}`}
+                          >
+                            <ServiceIcon className={`h-3.5 w-3.5 ${accent.text}`} />
+                          </div>
+                          <span className="font-mono text-xs font-semibold text-zinc-100">
+                            {service.name}
+                          </span>
+                        </div>
+                        <p className="font-mono text-[10px] leading-relaxed text-slate-400">
+                          {service.description}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+// ─── Extended Health Dashboard ───────────────────────────────────────────────
+
+function ExtendedHealthDashboard() {
+  const { toast } = useToast()
+  const [health, setHealth] = React.useState<HealthResponse | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+  const [loading, setLoading] = React.useState(true)
+  const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null)
+  const [paused, setPaused] = React.useState(false)
+
+  const fetchHealth = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/health/extended', { cache: 'no-store' })
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`)
+      }
+      const data = (await res.json()) as HealthResponse
+      setHealth(data)
+      setError(null)
+      setLastUpdated(new Date())
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to fetch extended health'
+      setError(msg)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  React.useEffect(() => {
+    void fetchHealth()
+    if (paused) return
+    const interval = setInterval(() => void fetchHealth(), 5000)
+    return () => clearInterval(interval)
+  }, [fetchHealth, paused])
+
+  const overall = health?.status ?? 'unhealthy'
+
+  const handleRefresh = () => {
+    setLoading(true)
+    void fetchHealth()
+    toast({
+      title: 'Extended health refreshed',
+      description: 'Re-ran all 13 infrastructure health checks in parallel.',
+    })
+  }
+
+  const counts = React.useMemo(() => {
+    const checks = health?.checks ?? []
+    return {
+      healthy: checks.filter((c) => c.status === 'healthy').length,
+      degraded: checks.filter((c) => c.status === 'degraded').length,
+      unhealthy: checks.filter((c) => c.status === 'unhealthy').length,
+    }
+  }, [health])
+
+  return (
+    <section id="health-extended" className="scroll-mt-8">
+      <SectionHeading
+        index="07"
+        title="Extended Health Dashboard"
+        description="All 13 production infrastructure checks — database, Redis, event bus, outbox, projections, workers, cache, rate limiter, circuit breakers, and more. Parallel, TTL-cached, auto-refreshing."
+        icon={ShieldAlert}
+        action={
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPaused((p) => !p)}
+              className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-300 hover:bg-slate-800 hover:text-zinc-100"
+            >
+              {paused ? 'Resume' : 'Pause'}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={loading}
+              className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-300 hover:bg-slate-800 hover:text-zinc-100"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
+        }
+      />
+
+      <div className="mt-8 grid gap-4 lg:grid-cols-[1.2fr_2fr]">
+        {/* Overall status */}
+        <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="font-mono text-sm uppercase tracking-wider text-slate-300">
+                Overall Status
+              </CardTitle>
+              <StatusDot status={overall} />
+            </div>
+            <CardDescription className="text-xs">
+              Aggregated from all registered extended health checks.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className={`rounded-lg border px-4 py-3 ${statusColor(overall)}`}>
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-2xl font-bold uppercase">
+                  {loading && !health ? '...' : overall}
+                </span>
+                <ShieldAlert className="h-5 w-5 opacity-70" />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2 font-mono text-xs">
+              <div className="rounded-md border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
+                <div className="text-slate-500">Healthy</div>
+                <div className="text-emerald-300">{counts.healthy}</div>
+              </div>
+              <div className="rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2">
+                <div className="text-slate-500">Degraded</div>
+                <div className="text-amber-300">{counts.degraded}</div>
+              </div>
+              <div className="rounded-md border border-rose-500/20 bg-rose-500/5 px-3 py-2">
+                <div className="text-slate-500">Unhealthy</div>
+                <div className="text-rose-300">{counts.unhealthy}</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 font-mono text-xs">
+              <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2">
+                <div className="text-slate-500">Checks</div>
+                <div className="text-zinc-200">{health?.checks.length ?? 0}</div>
+              </div>
+              <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2">
+                <div className="text-slate-500">Last Updated</div>
+                <div className="text-zinc-200">
+                  {lastUpdated ? lastUpdated.toLocaleTimeString() : '—'}
+                </div>
+              </div>
+            </div>
+            {error && (
+              <div className="flex items-start gap-2 rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span className="font-mono">{error}</span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Per-component grid */}
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {loading && !health ? (
+            <ExtendedHealthSkeletons />
+          ) : health && health.checks.length > 0 ? (
+            health.checks.map((check) => (
+              <ExtendedHealthCheckCard key={check.name} check={check} />
+            ))
+          ) : (
+            <div className="col-span-full flex items-center justify-center rounded-lg border border-dashed border-slate-800 py-12 text-sm text-slate-500">
+              No extended health checks registered.
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function ExtendedHealthCheckCard({ check }: { check: HealthCheck }) {
+  const Icon = COMPONENT_ICONS[check.name] ?? Server
+  return (
+    <Card className="border-slate-800 bg-slate-900/40 py-3 ring-1 ring-inset ring-slate-800/40">
+      <CardContent className="space-y-2 px-3 py-1">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <div className="flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-slate-950/60">
+              <Icon className="h-3 w-3 text-slate-300" />
+            </div>
+            <span className="font-mono text-xs text-zinc-100">{check.name}</span>
+          </div>
+          <span
+            className={`rounded border px-1.5 py-0.5 font-mono text-[9px] uppercase ${statusColor(check.status)}`}
+          >
+            {check.status}
+          </span>
+        </div>
+        <div className="flex items-center justify-between font-mono text-[10px]">
+          <span className="text-slate-500">latency</span>
+          <span className="text-cyan-300">{check.latencyMs} ms</span>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function ExtendedHealthSkeletons() {
+  return (
+    <>
+      {Array.from({ length: 12 }).map((_, i) => (
+        <Card
+          key={i}
+          className="border-slate-800 bg-slate-900/40 py-3 ring-1 ring-inset ring-slate-800/40"
+        >
+          <CardContent className="flex items-center gap-2 px-3 py-1">
+            <Loader2 className="h-3 w-3 animate-spin text-emerald-400/60" />
+            <span className="font-mono text-[10px] text-slate-500">Loading…</span>
+          </CardContent>
+        </Card>
+      ))}
+    </>
+  )
+}
+
+// ─── Worker Health Monitor ───────────────────────────────────────────────────
+
+function WorkerHealthMonitor() {
+  const [data, setData] = React.useState<WorkerHealthResponse | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+  const [loading, setLoading] = React.useState(true)
+  const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null)
+  const [paused, setPaused] = React.useState(false)
+
+  const fetchWorkers = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/workers/health', { cache: 'no-store' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const json = (await res.json()) as WorkerHealthResponse
+      setData(json)
+      setError(null)
+      setLastUpdated(new Date())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to fetch worker health')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  React.useEffect(() => {
+    void fetchWorkers()
+    if (paused) return
+    const interval = setInterval(() => void fetchWorkers(), 5000)
+    return () => clearInterval(interval)
+  }, [fetchWorkers, paused])
+
+  const workers = data?.workers ?? []
+
+  return (
+    <section id="workers" className="scroll-mt-8">
+      <SectionHeading
+        index="08"
+        title="Worker Health Monitor"
+        description="Outbox, Projection, Cleanup, and Analytics workers — running status, throughput, error rates, and average durations. Auto-refreshes every 5 seconds."
+        icon={Workflow}
+        action={
+          <div className="flex items-center gap-2">
+            <span className="hidden font-mono text-[10px] text-slate-500 sm:inline">
+              {lastUpdated ? `updated ${lastUpdated.toLocaleTimeString()}` : ''}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPaused((p) => !p)}
+              className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-300 hover:bg-slate-800 hover:text-zinc-100"
+            >
+              {paused ? 'Resume' : 'Pause'}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setLoading(true)
+                void fetchWorkers()
+              }}
+              disabled={loading}
+              className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-300 hover:bg-slate-800 hover:text-zinc-100"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
+        }
+      />
+
+      {error ? (
+        <div className="mt-6 flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span className="font-mono">{error}</span>
+        </div>
+      ) : loading && !data ? (
+        <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i} className="border-slate-800 bg-slate-900/40 py-4 ring-1 ring-inset ring-slate-800/40">
+              <CardContent className="flex items-center gap-2 px-4">
+                <Loader2 className="h-4 w-4 animate-spin text-emerald-400/60" />
+                <span className="font-mono text-xs text-slate-500">Loading…</span>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : workers.length === 0 ? (
+        <div className="mt-8 flex items-center justify-center rounded-lg border border-dashed border-slate-800 py-12 text-sm text-slate-500">
+          No workers registered.
+        </div>
+      ) : (
+        <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {workers.map((worker) => (
+            <WorkerCard key={worker.name} worker={worker} />
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function WorkerCard({ worker }: { worker: WorkerHealth }) {
+  return (
+    <Card className="border-slate-800 bg-slate-900/50 py-4 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+      <CardHeader className="gap-2 px-4">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span
+              className={`relative flex h-2.5 w-2.5 ${worker.running ? '' : 'opacity-50'}`}
+            >
+              {worker.running && (
+                <span
+                  className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 bg-emerald-400"
+                />
+              )}
+              <span
+                className={`relative inline-flex h-2.5 w-2.5 rounded-full ${
+                  worker.running ? 'bg-emerald-400' : 'bg-slate-600'
+                }`}
+              />
+            </span>
+            <CardTitle className="font-mono text-xs text-zinc-100">
+              {worker.name}
+            </CardTitle>
+          </div>
+          <Badge
+            variant="outline"
+            className={
+              worker.running
+                ? 'border-emerald-500/30 bg-emerald-500/10 font-mono text-[9px] uppercase text-emerald-300'
+                : 'border-slate-700 bg-slate-900/60 font-mono text-[9px] uppercase text-slate-400'
+            }
+          >
+            {worker.running ? 'running' : 'stopped'}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 px-4">
+        <div className="grid grid-cols-2 gap-2 font-mono text-xs">
+          <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2">
+            <div className="text-slate-500">Processed</div>
+            <div className="text-emerald-300">{worker.totalProcessed}</div>
+          </div>
+          <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2">
+            <div className="text-slate-500">Errors</div>
+            <div
+              className={
+                worker.totalErrors > 0 ? 'text-rose-300' : 'text-slate-300'
+              }
+            >
+              {worker.totalErrors}
+            </div>
+          </div>
+          <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2">
+            <div className="text-slate-500">Avg Duration</div>
+            <div className="text-cyan-300">
+              {worker.avgDurationMs.toFixed(1)} ms
+            </div>
+          </div>
+          <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2">
+            <div className="text-slate-500">Last Run</div>
+            <div className="text-zinc-200">
+              {worker.lastRunAt
+                ? new Date(worker.lastRunAt).toLocaleTimeString()
+                : '—'}
+            </div>
+          </div>
+        </div>
+        {worker.lastError && (
+          <div className="rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2">
+            <div className="flex items-center gap-2 font-mono text-[10px] text-rose-300">
+              <AlertCircle className="h-3 w-3" />
+              Last Error
+            </div>
+            <p className="mt-1 truncate font-mono text-[10px] text-rose-300/80">
+              {worker.lastError}
+            </p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ─── Prometheus Metrics Preview ──────────────────────────────────────────────
+
+function PrometheusMetrics() {
+  const [metrics, setMetrics] = React.useState<string>('')
+  const [error, setError] = React.useState<string | null>(null)
+  const [loading, setLoading] = React.useState(true)
+  const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null)
+  const [paused, setPaused] = React.useState(false)
+  const [expanded, setExpanded] = React.useState(false)
+
+  const fetchMetrics = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/metrics', { cache: 'no-store' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const text = await res.text()
+      setMetrics(text)
+      setError(null)
+      setLastUpdated(new Date())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to fetch metrics')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  React.useEffect(() => {
+    void fetchMetrics()
+    if (paused) return
+    const interval = setInterval(() => void fetchMetrics(), 10000)
+    return () => clearInterval(interval)
+  }, [fetchMetrics, paused])
+
+  const lines = React.useMemo(() => metrics.split('\n'), [metrics])
+  const previewLines = expanded ? lines : lines.slice(0, 50)
+  const totalLines = lines.length
+
+  // Extract the latest numeric value for each key metric (ignoring HELP/TYPE lines).
+  const keyMetricValues = React.useMemo(() => {
+    const out: Array<{ name: string; value: string | null }> = []
+    for (const name of KEY_METRIC_NAMES) {
+      const match = lines.find(
+        (l) => l.startsWith(name + ' ') || l.startsWith(name + '{'),
+      )
+      if (match) {
+        const valuePart = match.split(' ').pop() ?? null
+        out.push({ name, value: valuePart })
+      } else {
+        out.push({ name, value: null })
+      }
+    }
+    return out
+  }, [lines])
+
+  return (
+    <section id="metrics" className="scroll-mt-8">
+      <SectionHeading
+        index="09"
+        title="Prometheus Metrics"
+        description="Live Prometheus-compatible metrics from the MetricsFramework — counters, gauges, and histograms for every subsystem. Updates every 10 seconds."
+        icon={BarChart3}
+        action={
+          <div className="flex items-center gap-2">
+            <span className="hidden font-mono text-[10px] text-slate-500 sm:inline">
+              {lastUpdated ? `updated ${lastUpdated.toLocaleTimeString()}` : ''}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPaused((p) => !p)}
+              className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-300 hover:bg-slate-800 hover:text-zinc-100"
+            >
+              {paused ? 'Resume' : 'Pause'}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setLoading(true)
+                void fetchMetrics()
+              }}
+              disabled={loading}
+              className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-300 hover:bg-slate-800 hover:text-zinc-100"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
+        }
+      />
+
+      <div className="mt-8 grid gap-4 lg:grid-cols-[1fr_2fr]">
+        {/* Key metrics summary */}
+        <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+          <CardHeader className="gap-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="flex h-7 w-7 items-center justify-center rounded-md border border-emerald-500/30 bg-emerald-500/10">
+                  <Gauge className="h-3.5 w-3.5 text-emerald-400" />
+                </div>
+                <CardTitle className="font-mono text-sm text-zinc-100">
+                  Key Metrics
+                </CardTitle>
+              </div>
+              <Badge
+                variant="outline"
+                className="border-slate-700 bg-slate-950/60 font-mono text-[10px] text-slate-400"
+              >
+                {totalLines} lines
+              </Badge>
+            </div>
+            <CardDescription className="text-xs">
+              Latest values for the most-watched platform metrics.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {keyMetricValues.map(({ name, value }) => (
+              <div
+                key={name}
+                className="flex items-center justify-between rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2"
+              >
+                <span className="font-mono text-[10px] text-slate-400">
+                  {name}
+                </span>
+                <span
+                  className={`font-mono text-xs ${
+                    value === null ? 'text-slate-600' : 'text-emerald-300'
+                  }`}
+                >
+                  {value ?? '—'}
+                </span>
+              </div>
+            ))}
+            {error && (
+              <div className="mt-2 flex items-start gap-2 rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span className="font-mono">{error}</span>
+              </div>
+            )}
+            <a
+              href="/api/metrics"
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 inline-flex items-center gap-1.5 font-mono text-[10px] text-cyan-300 hover:text-cyan-200"
+            >
+              <ExternalLink className="h-3 w-3" />
+              Open raw /api/metrics
+            </a>
+          </CardContent>
+        </Card>
+
+        {/* Raw metrics preview */}
+        <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+          <CardHeader className="gap-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="font-mono text-sm text-zinc-100">
+                Raw Prometheus Output
+              </CardTitle>
+              <Badge
+                variant="outline"
+                className="border-slate-700 bg-slate-950/60 font-mono text-[10px] text-slate-400"
+              >
+                text/plain; version=0.0.4
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <ScrollArea className="h-96 rounded-md border border-slate-800 bg-slate-950/80">
+              {loading && !metrics ? (
+                <div className="flex h-full items-center justify-center py-12">
+                  <Loader2 className="h-5 w-5 animate-spin text-emerald-400/60" />
+                </div>
+              ) : (
+                <pre className="p-3 font-mono text-[10px] leading-tight text-slate-300">
+                  {previewLines.map((line, i) => {
+                    const isHelp = line.startsWith('# HELP')
+                    const isType = line.startsWith('# TYPE')
+                    const isKeyMetric = KEY_METRIC_NAMES.some(
+                      (km) =>
+                        line.startsWith(km + ' ') ||
+                        line.startsWith(km + '{'),
+                    )
+                    const cls = isKeyMetric
+                      ? 'bg-emerald-500/10 text-emerald-300'
+                      : isHelp
+                      ? 'text-slate-500'
+                      : isType
+                      ? 'text-cyan-400/80'
+                      : 'text-slate-300'
+                    return (
+                      <div key={i} className={`px-2 ${cls}`}>
+                        {line || ' '}
+                      </div>
+                    )
+                  })}
+                </pre>
+              )}
+            </ScrollArea>
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-[10px] text-slate-500">
+                Showing {previewLines.length} of {totalLines} lines
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setExpanded((e) => !e)}
+                className="font-mono text-xs text-cyan-300 hover:bg-cyan-500/10 hover:text-cyan-200"
+              >
+                {expanded ? 'Show first 50' : 'View full metrics'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </section>
+  )
+}
+
+// ─── Feature Flags Manager ───────────────────────────────────────────────────
+
+function FeatureFlagsManager() {
+  const { toast } = useToast()
+  const [flags, setFlags] = React.useState<FeatureFlag[]>([])
+  const [loading, setLoading] = React.useState(true)
+
+  // Create form state
+  const [newKey, setNewKey] = React.useState('')
+  const [newType, setNewType] = React.useState<FlagType>('boolean')
+  const [newEnabled, setNewEnabled] = React.useState(true)
+  const [newPercentage, setNewPercentage] = React.useState(50)
+  const [creating, setCreating] = React.useState(false)
+
+  // Evaluate state
+  const [evalKey, setEvalKey] = React.useState('')
+  const [evalUserId, setEvalUserId] = React.useState('')
+  const [evalCountry, setEvalCountry] = React.useState('')
+  const [evalResult, setEvalResult] = React.useState<EvaluationResult | null>(null)
+  const [evaluating, setEvaluating] = React.useState(false)
+
+  const fetchFlags = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/feature-flags', { cache: 'no-store' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = (await res.json()) as FeatureFlagListResponse
+      setFlags(data.flags)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to load flags'
+      toast({
+        title: 'Failed to load flags',
+        description: msg,
+        variant: 'destructive',
+      })
+    } finally {
+      setLoading(false)
+    }
+  }, [toast])
+
+  React.useEffect(() => {
+    void fetchFlags()
+  }, [fetchFlags])
+
+  const handleCreate = async () => {
+    if (!newKey.trim()) {
+      toast({
+        title: 'Validation error',
+        description: 'Flag key is required.',
+        variant: 'destructive',
+      })
+      return
+    }
+    setCreating(true)
+    try {
+      const flag: FeatureFlag =
+        newType === 'percentage'
+          ? {
+              key: newKey.trim(),
+              type: newType,
+              enabled: newEnabled,
+              percentage: Math.max(0, Math.min(100, newPercentage)),
+            }
+          : {
+              key: newKey.trim(),
+              type: newType,
+              enabled: newEnabled,
+            }
+      const res = await fetch('/api/feature-flags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set', flag }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      await fetchFlags()
+      setNewKey('')
+      toast({
+        title: 'Flag created',
+        description: `${flag.key} (${flag.type})`,
+      })
+    } catch (e) {
+      toast({
+        title: 'Failed to create flag',
+        description: e instanceof Error ? e.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleDelete = async (key: string) => {
+    try {
+      const res = await fetch('/api/feature-flags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', key }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      if (evalKey === key) {
+        setEvalKey('')
+        setEvalResult(null)
+      }
+      await fetchFlags()
+      toast({ title: 'Flag deleted', description: key })
+    } catch (e) {
+      toast({
+        title: 'Failed to delete flag',
+        description: e instanceof Error ? e.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const handleEvaluate = async () => {
+    if (!evalKey) {
+      toast({
+        title: 'Validation error',
+        description: 'Select a flag to evaluate.',
+        variant: 'destructive',
+      })
+      return
+    }
+    setEvaluating(true)
+    setEvalResult(null)
+    try {
+      const context: Record<string, unknown> = {}
+      if (evalUserId.trim()) context.userId = evalUserId.trim()
+      if (evalCountry.trim()) context.country = evalCountry.trim().toUpperCase()
+      const res = await fetch('/api/feature-flags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'evaluate', key: evalKey, context }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = (await res.json()) as EvaluationResult
+      setEvalResult(data)
+      toast({
+        title: 'Evaluation result',
+        description: `${evalKey} → ${data.enabled ? 'enabled' : 'disabled'} (${data.reason})`,
+      })
+    } catch (e) {
+      toast({
+        title: 'Evaluation failed',
+        description: e instanceof Error ? e.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    } finally {
+      setEvaluating(false)
+    }
+  }
+
+  const flagTypeOptions: FlagType[] = [
+    'boolean',
+    'percentage',
+    'country',
+    'region',
+    'user',
+    'organization',
+    'time-window',
+    'kill-switch',
+  ]
+
+  return (
+    <section id="feature-flags" className="scroll-mt-8">
+      <SectionHeading
+        index="10"
+        title="Feature Flags Manager"
+        description="Runtime-toggleable flags with eight evaluation strategies — boolean, percentage, country, region, user, organization, time-window, and kill-switch. Cached with TTL invalidation."
+        icon={Flag}
+        action={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setLoading(true)
+              void fetchFlags()
+            }}
+            disabled={loading}
+            className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-300 hover:bg-slate-800 hover:text-zinc-100"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        }
+      />
+
+      <div className="mt-8 grid gap-4 lg:grid-cols-2">
+        {/* Create form */}
+        <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+          <CardHeader className="gap-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="flex h-7 w-7 items-center justify-center rounded-md border border-emerald-500/30 bg-emerald-500/10">
+                  <Plus className="h-3.5 w-3.5 text-emerald-400" />
+                </div>
+                <CardTitle className="font-mono text-sm text-zinc-100">
+                  Create Flag
+                </CardTitle>
+              </div>
+              <Badge
+                variant="outline"
+                className="border-slate-700 bg-slate-950/60 font-mono text-[10px] text-slate-400"
+              >
+                POST · action: set
+              </Badge>
+            </div>
+            <CardDescription className="text-xs">
+              Register a new flag in the in-memory flag store.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid gap-2">
+              <Label htmlFor="flag-key" className="font-mono text-xs text-slate-400">
+                Key
+              </Label>
+              <Input
+                id="flag-key"
+                value={newKey}
+                onChange={(e) => setNewKey(e.target.value)}
+                placeholder="my_feature_v2"
+                className="border-slate-700 bg-slate-950/60 font-mono text-xs text-emerald-300 focus-visible:ring-emerald-500/30"
+                spellCheck={false}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label className="font-mono text-xs text-slate-400">Type</Label>
+              <Select
+                value={newType}
+                onValueChange={(v) => setNewType(v as FlagType)}
+              >
+                <SelectTrigger className="border-slate-700 bg-slate-950/60 font-mono text-xs text-zinc-100 focus-visible:ring-emerald-500/30">
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent className="border-slate-700 bg-slate-900 font-mono text-xs text-zinc-100">
+                  {flagTypeOptions.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {t}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {newType === 'percentage' && (
+              <div className="grid gap-2">
+                <Label
+                  htmlFor="flag-percentage"
+                  className="font-mono text-xs text-slate-400"
+                >
+                  Percentage (0-100)
+                </Label>
+                <Input
+                  id="flag-percentage"
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={newPercentage}
+                  onChange={(e) => setNewPercentage(Number(e.target.value))}
+                  className="border-slate-700 bg-slate-950/60 font-mono text-xs text-cyan-300 focus-visible:ring-emerald-500/30"
+                />
+              </div>
+            )}
+            <div className="flex items-center justify-between rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2">
+              <Label
+                htmlFor="flag-enabled"
+                className="font-mono text-xs text-slate-300"
+              >
+                Enabled
+              </Label>
+              <Switch
+                id="flag-enabled"
+                checked={newEnabled}
+                onCheckedChange={setNewEnabled}
+                className="data-[state=checked]:bg-emerald-600 data-[state=unchecked]:bg-slate-700"
+              />
+            </div>
+            <Button
+              onClick={handleCreate}
+              disabled={creating}
+              className="bg-emerald-600 font-mono text-xs text-white hover:bg-emerald-500"
+            >
+              {creating ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Plus className="h-3.5 w-3.5" />
+              )}
+              Create Flag
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Evaluate panel */}
+        <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+          <CardHeader className="gap-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="flex h-7 w-7 items-center justify-center rounded-md border border-cyan-500/30 bg-cyan-500/10">
+                  <Zap className="h-3.5 w-3.5 text-cyan-400" />
+                </div>
+                <CardTitle className="font-mono text-sm text-zinc-100">
+                  Evaluate Flag
+                </CardTitle>
+              </div>
+              <Badge
+                variant="outline"
+                className="border-slate-700 bg-slate-950/60 font-mono text-[10px] text-slate-400"
+              >
+                POST · action: evaluate
+              </Badge>
+            </div>
+            <CardDescription className="text-xs">
+              Evaluate a flag against a runtime context.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid gap-2">
+              <Label className="font-mono text-xs text-slate-400">Flag</Label>
+              <Select value={evalKey} onValueChange={setEvalKey}>
+                <SelectTrigger className="border-slate-700 bg-slate-950/60 font-mono text-xs text-zinc-100 focus-visible:ring-emerald-500/30">
+                  <SelectValue placeholder="Select a flag" />
+                </SelectTrigger>
+                <SelectContent className="border-slate-700 bg-slate-900 font-mono text-xs text-zinc-100">
+                  {flags.length === 0 ? (
+                    <SelectItem value="__none__" disabled>
+                      No flags registered
+                    </SelectItem>
+                  ) : (
+                    flags.map((f) => (
+                      <SelectItem key={f.key} value={f.key}>
+                        {f.key} ({f.type})
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label
+                htmlFor="eval-user"
+                className="font-mono text-xs text-slate-400"
+              >
+                User ID (optional)
+              </Label>
+              <Input
+                id="eval-user"
+                value={evalUserId}
+                onChange={(e) => setEvalUserId(e.target.value)}
+                placeholder="user_123"
+                className="border-slate-700 bg-slate-950/60 font-mono text-xs text-cyan-300 focus-visible:ring-emerald-500/30"
+                spellCheck={false}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label
+                htmlFor="eval-country"
+                className="font-mono text-xs text-slate-400"
+              >
+                Country (optional)
+              </Label>
+              <Input
+                id="eval-country"
+                value={evalCountry}
+                onChange={(e) => setEvalCountry(e.target.value)}
+                placeholder="US"
+                maxLength={2}
+                className="border-slate-700 bg-slate-950/60 font-mono text-xs text-cyan-300 focus-visible:ring-emerald-500/30"
+                spellCheck={false}
+              />
+            </div>
+            <Button
+              onClick={handleEvaluate}
+              disabled={evaluating}
+              variant="outline"
+              className="border-cyan-500/40 bg-cyan-500/10 font-mono text-xs text-cyan-300 hover:bg-cyan-500/20 hover:text-cyan-200"
+            >
+              {evaluating ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Zap className="h-3.5 w-3.5" />
+              )}
+              Evaluate
+            </Button>
+            {evalResult && (
+              <div
+                className={`rounded-md border px-3 py-2 ${
+                  evalResult.enabled
+                    ? 'border-emerald-500/30 bg-emerald-500/10'
+                    : 'border-slate-700 bg-slate-900/60'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs text-slate-400">
+                    Result
+                  </span>
+                  <Badge
+                    variant="outline"
+                    className={
+                      evalResult.enabled
+                        ? 'border-emerald-500/40 bg-emerald-500/15 font-mono text-[10px] uppercase text-emerald-300'
+                        : 'border-slate-600 bg-slate-800/60 font-mono text-[10px] uppercase text-slate-400'
+                    }
+                  >
+                    {evalResult.enabled ? 'enabled' : 'disabled'}
+                  </Badge>
+                </div>
+                <p className="mt-1 font-mono text-[10px] text-slate-400">
+                  {evalResult.reason}
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Existing flags list (full width) */}
+        <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60 lg:col-span-2">
+          <CardHeader className="gap-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="flex h-7 w-7 items-center justify-center rounded-md border border-emerald-500/30 bg-emerald-500/10">
+                  <Flag className="h-3.5 w-3.5 text-emerald-400" />
+                </div>
+                <CardTitle className="font-mono text-sm text-zinc-100">
+                  Registered Flags
+                </CardTitle>
+              </div>
+              <Badge
+                variant="outline"
+                className="border-slate-700 bg-slate-950/60 font-mono text-xs text-slate-300"
+              >
+                {loading ? '…' : flags.length}
+              </Badge>
+            </div>
+            <CardDescription className="text-xs">
+              GET /api/feature-flags
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-5 w-5 animate-spin text-slate-600" />
+              </div>
+            ) : flags.length === 0 ? (
+              <div className="flex items-center justify-center rounded-lg border border-dashed border-slate-800 py-12 text-sm text-slate-500">
+                No flags registered. Create one above to get started.
+              </div>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {flags.map((flag) => (
+                  <div
+                    key={flag.key}
+                    className="flex items-center justify-between gap-2 rounded-md border border-slate-800 bg-slate-950/40 px-3 py-2"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate font-mono text-xs text-emerald-300">
+                          {flag.key}
+                        </span>
+                        <Badge
+                          variant="outline"
+                          className="border-slate-700 bg-slate-900/60 px-1.5 py-0 font-mono text-[9px] text-slate-400"
+                        >
+                          {flag.type}
+                        </Badge>
+                      </div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-2 font-mono text-[10px] text-slate-500">
+                        <span
+                          className={
+                            flag.enabled ? 'text-emerald-400' : 'text-slate-500'
+                          }
+                        >
+                          {flag.enabled ? 'enabled' : 'disabled'}
+                        </span>
+                        {flag.percentage !== undefined && (
+                          <span>· {flag.percentage}%</span>
+                        )}
+                        {flag.allowedCountries &&
+                          flag.allowedCountries.length > 0 && (
+                            <span>· {flag.allowedCountries.join(',')}</span>
+                          )}
+                        {flag.allowedUsers && flag.allowedUsers.length > 0 && (
+                          <span>· users:{flag.allowedUsers.length}</span>
+                        )}
+                        {flag.description && (
+                          <span className="truncate">· {flag.description}</span>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      onClick={() => void handleDelete(flag.key)}
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 shrink-0 px-2 text-rose-400 hover:bg-rose-500/10 hover:text-rose-300"
+                      aria-label={`Delete flag ${flag.key}`}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </section>
   )
 }

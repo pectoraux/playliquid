@@ -1,0 +1,240 @@
+     1→     1→# PlayLiquid — Milestone 1: Production Architecture Foundation
+     2→     2→
+     3→     3→## Objective
+     4→     4→Transform PlayLiquid into a production-grade, event-driven platform with DDD, CQRS, Event Sourcing, Outbox Pattern, and strict architectural boundaries.
+     5→     5→
+     6→     6→## Architecture Plan
+     7→     7→- `src/shared/` — primitives (ids, types, Result, errors, config, logging, utils)
+     8→     8→- `src/domain/shared/` — AggregateRoot, Entity, ValueObject, DomainEvent, Repository, Specification
+     9→     9→- `src/domain/value-objects/` — Money, Score, GameTime, Email, Username, etc.
+    10→    10→- `src/domain/events/` — Domain event registry
+    11→    11→- `src/application/` — CommandBus, QueryBus, pipelines, handlers, validation, authorization, UoW
+    12→    12→- `src/infrastructure/` — EventStore, Outbox, EventBus, UoW impl, DI container, projections, cache, telemetry
+    13→    13→- `src/interfaces/` — API routes, health checks, workers
+    14→    14→- Architecture enforcement via ESLint boundary rules + checker script
+    15→    15→
+    16→    16→## Build Order
+    17→    17→1. shared layer (no deps)
+    18→    18→2. domain/shared (depends on shared)
+    19→    19→3. value objects + events (depends on domain/shared)
+    20→    20→4. application (depends on domain)
+    21→    21→5. infrastructure (depends on application + domain)
+    22→    22→6. prisma schema + db push
+    23→    23→7. interfaces (depends on infrastructure)
+    24→    24→8. architecture enforcement
+    25→    25→9. landing page
+    26→    26→10. verification
+    27→    27→
+    28→    28→---
+    29→    29→Task ID: 9
+    30→    30→Agent: frontend-styling-expert
+    31→    31→Task: Build the PlayLiquid architecture dashboard landing page
+    32→    32→
+    33→    33→Work Log:
+    34→    34→- Read worklog.md to understand the milestones built by prior agents (DDD/CQRS/Event Sourcing/Outbox layers, DI container, API routes, health checks).
+    35→    35→- Inspected available shadcn/ui components (Card, Badge, Button, Input, Label, Separator, ScrollArea, Tabs, Alert, Table), the existing layout.tsx (uses `Toaster` from `@/components/ui/toaster`), and all API route handlers in `src/interfaces/api/handlers.ts` + `src/interfaces/workers/handlers.ts` to confirm response shapes.
+    36→    36→- Replaced `src/app/page.tsx` with a full 'use client' dashboard (~1000 lines) composed of small focused components: Header, BackgroundGrid, ArchitectureLayers, HealthDashboard, EventSourcingDemo, RegistryDisplay, PipelineVisualization, Footer, plus shared SectionHeading/StatusDot/StepHeader/StepResult primitives.
+    37→    37→- Visual design: dark slate-950 background with a subtle emerald grid overlay + radial glow accents; emerald and cyan as the ONLY accent colors (no indigo/blue); monospace (`font-mono`) for all technical labels, IDs, code, and JSON output.
+    38→    38→- Layout uses `dark flex min-h-screen flex-col` on the root wrapper with `mt-auto` on the footer so the footer sticks on short pages and pushes down naturally on long ones. All sections responsive (1-col mobile → up to 5-col `lg`).
+    39→    39→- Hero includes "PlayLiquid" title, "Production-Grade Event-Driven Architecture" subtitle, DDD/CQRS/Event Sourcing/Outbox badges, and the green "Boundaries Verified" enforcement badge.
+    40→    40→- Architecture Layers section renders 5 cards (Shared, Domain, Application, Infrastructure, Interfaces) with icons, descriptions, and component badges; arrow connectors + a dependency-direction caption.
+    41→    41→- Live Health Dashboard auto-refreshes every 5s via `setInterval` (pausable), fetches `GET /api/health`, shows overall status with animated StatusDot, per-component cards (database, event-store, event-bus, outbox, cache) with latency + raw `details` JSON, plus loading skeletons and error alert.
+    42→    42→- Event Sourcing Demo: 4-step interactive flow (Dispatch Command → Process Outbox → Run Projections → Query Game) with a horizontal FlowIndicator (1→2→3→4) showing pending/running/success/error states. Step 1 has a real form (gameId pre-filled with `crypto.randomUUID()`, title, creatorId) that POSTs `{commandType:'PublishGame', payload}` to `/api/commands`. Steps 2–4 are gated on the previous step's success so the demo flows correctly. Each step shows a JSON result card with timestamp or an error alert.
+    43→    43→- Registry Display fetches `GET /api/architecture` and renders 4 cards in a responsive grid: Event Types (ScrollArea `h-48`), Command Types, Query Types, and DI Bindings (singleton/transient counts + scrollable binding list). All counts shown as badges.
+    44→    44→- Pipeline Visualization renders the 7-stage Command Bus pipeline (Correlation → Logging → Metrics → Idempotency → Validation → Authorization → Transaction → Handler) and the 4-stage Query Bus pipeline (Logging → Metrics → Cache → Handler) as vertical numbered stage lists with downward arrows; Handler is highlighted as the terminal stage.
+    45→    45→- Footer is sticky (`mt-auto`), shows "PlayLiquid · Architecture Foundation · Milestone 1", and links to /api/health, /api/ready, /api/live.
+    46→    46→- Toast feedback wired via `useToast` from `@/hooks/use-toast` (matches the Toaster mounted in layout.tsx).
+    47→    47→- Verification: ran `bunx tsc --noEmit --skipLibCheck` — zero errors in `src/app/page.tsx`. Started `next dev` on port 3001 — `GET /` returns HTTP 200 with all 7 sections (Hero, Architecture Layers, Live Health Dashboard, Event Sourcing Demo, Registry Display, Pipeline Visualization, Footer) present in the rendered HTML.
+    48→    48→
+    49→    49→Stage Summary:
+    50→    50→- `/home/z/my-project/src/app/page.tsx` replaced with a comprehensive, production-style architecture dashboard.
+    51→    51→- All 7 required sections implemented with full interactivity (auto-refresh health, 4-step CQRS round-trip, registry introspection, pipeline diagrams).
+    52→    52→- Dark theme with emerald/cyan accents only (no indigo/blue), monospace technical type, responsive mobile-first layout, sticky footer.
+    53→    53→- Page renders successfully (HTTP 200, ~120 KB HTML) and all client-side state management is in place.
+    54→    54→- NOTE (out of scope for this task, surfaced for the next agent): the API routes at `/api/health`, `/api/architecture`, `/api/commands`, `/api/queries`, `/api/workers/*` currently fail to compile because `src/interfaces/api/handlers.ts` and `src/interfaces/workers/handlers.ts` import `TOKENS` from `@/infrastructure/di/composition-root`, but that module imports `TOKENS` from `@/infrastructure/di/tokens` without re-exporting it. Fix: add `export { TOKENS } from '@/infrastructure/di/tokens';` to `composition-root.ts` (one-line change, in a file outside this task's write scope). Once fixed, all dashboard API calls will succeed end-to-end.
+    55→    55→
+    56→    56→---
+    57→    57→Task ID: 1-8, 10
+    58→    58→Agent: main
+    59→    59→Task: Build the complete PlayLiquid production architecture foundation
+    60→    60→
+    61→    61→Work Log:
+    62→    62→- Built shared layer: ids, types, Result, config (zod-validated, fail-fast), structured JSON logging, utils
+    63→    63→- Built domain/shared layer: AggregateRoot (event-sourced, snapshot, rehydrate), Entity, ValueObject, DomainEvent + registry, Repository interfaces, Specification pattern, Domain Error framework (7 error categories)
+    64→    64→- Built 14 value objects: Money, Currency, Score, GameTime, Email, Username, Country, Percentage, Nonce, CorrelationId, Version, PlayerId, GameId, SessionId
+    65→    65→- Built 25 domain events across 9 domains (gaming, sessions, economy, scoring, identity, marketplace, creator, payments, ai)
+    66→    66→- Built application layer: CommandBus + QueryBus with 7-middleware pipeline (correlation → logging → metrics → idempotency → validation → authorization → transaction), validation framework (Zod), authorization framework (RBAC/ABAC/policy engine), UnitOfWork interface, application ports (EventStore, OutboxRepository, EventBus, MetricsRecorder, Cache, GameReadModelStore)
+    67→    67→- Built infrastructure layer: PrismaEventStore (optimistic concurrency, snapshots, replay), PrismaSnapshotStore, OutboxRepository + OutboxPublisher worker, InMemoryEventBus, InMemoryCache (LRU+TTL), InMemoryMetricsRecorder, PrismaIdempotencyStore, ProjectionEngine + 4 projectors (Game, Wallet, Leaderboard, Statistics), CheckpointStore, DIContainer, composition root
+    68→    68→- Built Prisma schema: EventRecord (autoincrement for replay), Snapshot, OutboxMessage, ProjectionCheckpoint, IdempotencyRecord, 6 read models, HealthCheck
+    69→    69→- Built example aggregate: GameAggregate with publish/unpublish, raising GamePublished/GameUnpublished events
+    70→    70→- Built example command: PublishGameCommand + handler (full event sourcing flow)
+    71→    71→- Built example query: GetGameQuery + handler (reads from materialized view)
+    72→    72→- Built interfaces layer: health/ready/live endpoints, command/query dispatch, worker triggers (outbox/projections/rebuild), architecture introspection
+    73→    73→- Built architecture enforcement: standalone boundary checker script (validates layer dependencies, no Prisma outside infra, no process.env outside config, no `any` in domain/shared)
+    74→    74→- Fixed all architecture violations: moved port interfaces to application layer, application no longer imports infrastructure
+    75→    75→
+    76→    76→Stage Summary:
+    77→    77→- Lint passes: 0 errors
+    78→    78→- Architecture checker passes: 0 violations (147 files scanned)
+    79→    79→- Full CQRS + event sourcing flow verified end-to-end:
+    80→    80→  1. POST /api/commands (PublishGame) → event appended to EventStore + Outbox
+    81→    81→  2. POST /api/workers/outbox → event published to EventBus (1 published)
+    82→    82→  3. POST /api/workers/projections → read models updated (4 processed)
+    83→    83→  4. POST /api/queries (GetGame) → returns game from materialized read model
+    84→    84→- Health endpoints report: database, event-store, event-bus, outbox, cache all healthy
+    85→    85→- 25 event types, 1 command type, 1 query type registered
+    86→    86→- TransactionMiddleware wraps handler execution in Prisma $transaction for atomicity
+    87→    87→
+    88→    88→---
+    89→    89→Task ID: M2-5
+    90→    90→Agent: general-purpose
+    91→    91→Task: Build feature flag platform + secret management + configuration service
+    92→    92→
+    93→    93→Work Log:
+    94→    94→- Read worklog.md to understand the M1 architecture (shared/domain/application/infrastructure/interfaces layers, architecture checker rules: no `process.env` outside `shared/config/`, no Prisma outside `infrastructure/`, no `any` in domain/shared, `import type` for type-only imports, no ES2015 namespaces).
+    95→    95→- Inspected existing infrastructure modules (cache, rate-limiter, circuit-breaker, cache-provider) to match style (interface + concrete impl, ScopedLogger via `logger.system()`, in-memory default with provider-injection pattern).
+    96→    96→- Created `/home/z/my-project/src/infrastructure/feature-flags/feature-flags.ts`:
+    97→    97→  - Defined `FlagType`, `FeatureFlag`, `EvaluationContext`, `FeatureFlagService`, `FeatureFlagStore` interfaces per the task spec.
+    98→    98→  - `InMemoryFeatureFlagStore` (default backing store, Map-backed).
+    99→    99→  - `CachedFeatureFlagService` implementing all 8 flag types: boolean, percentage (djb2 hash of `${key}:${rolloutId}` mod 100, deterministic per rolloutId), country/region/user/organization allowlists, time-window (inclusive on both `startAt` and `endAt`, defaults to ±Infinity), and kill-switch (always returns false, overrides `enabled: true`).
+   100→   100→  - Cache: TTL-keyed `Map<string, { enabled, reason, expiresAt }>`; cache key combines flag key + deterministically-serialized context (sorted field names) so per-context evaluations are cached independently.
+   101→   101→  - `invalidateCache(key?)` clears either a single flag's entries (prefix match) or the whole cache. `setFlag`/`deleteFlag` auto-invalidate the affected key.
+   102→   102→- Created `/home/z/my-project/src/infrastructure/secrets/secret-provider.ts`:
+   103→   103→  - `SecretProvider` interface + `SecretMetadata` + `SecretValidator` types.
+   104→   104→  - `EnvironmentSecretProvider`: reads via `getEnvVar()` from `@/shared/config` (no direct `process.env` access — keeps the architecture rule); caches values in memory; supports optional `prefix` (e.g. `SECRET_`) and optional per-name `validators`; `rotate()` is a no-op that logs a warning; `validate()` returns false rather than throwing on missing/invalid secrets; `list()` returns cache + validator keys (env-backed providers cannot enumerate raw env from outside the config layer); `getJson<T>()` parses with a `SecretFormatError` on bad JSON.
+   105→   105→  - `ChainedSecretProvider`: tries providers in order; only `SecretNotFoundError` advances to the next provider (other errors propagate); `rotate()` forwards to whichever provider owns the secret; `validate()` returns true if any provider validates; `list()` unions all providers' lists.
+   106→   106→  - Error classes `SecretNotFoundError` and `SecretFormatError` with proper `name` and `secretName` fields.
+   107→   107→- Created `/home/z/my-project/src/infrastructure/config/config-service.ts`:
+   108→   108→  - `ConfigService` interface + `DefaultConfigService` extending the existing `getConfig()/loadConfig()/resetConfig()` from `@/shared/config`.
+   109→   109→  - Dot-notation path access via `get<T>(path)`: overrides take precedence, then env-backed config snapshot; `ConfigPathNotFoundError` thrown on missing paths.
+   110→   110→  - Runtime overrides map: `setOverride(path, value)` / `clearOverride(path)`; overrides survive `reload()` since they live in this service, not in shared/config's cache.
+   111→   111→  - `reload()`: calls `resetConfig()` then `loadConfig()` (re-validates via the existing Zod schema, throws on invalid config), preserves the override map, logs the count.
+   112→   112→  - `getAll()`: deep-clones the config snapshot and applies overrides on top via `setPath`.
+   113→   113→  - Secret references: config values prefixed with `secret:` are recognized; `get()` is synchronous so it throws `SecretRefSyncError` directing callers to `getSecret()` (which is async and delegates to the SecretProvider).
+   114→   114→  - Constructor accepts an injected `SecretProvider` (defaults to `EnvironmentSecretProvider`) for swappable backends.
+   115→   115→- Added two small helpers to `/home/z/my-project/src/shared/config/index.ts` so infrastructure code can read raw env vars without violating the "no `process.env` outside shared/config" rule: `getEnvVar(name): string | undefined` and `requireEnvVar(name): string` (throws on missing). These keep ALL `process.env` access confined to shared/config.
+   116→   116→- Fixed pre-existing architecture violation in `src/infrastructure/redis/redis-client.ts:275` (was calling `process.env.REDIS_URL` directly) by switching to `getEnvVar('REDIS_URL')`.
+   117→   117→- Fixed pre-existing lint parse error in `src/infrastructure/scheduler/scheduled-job-model.ts:44` — a JSDoc comment containing `*/5 * * * *` was prematurely terminating the block comment; reworded to `0,5,10,...` cron syntax.
+   118→   118→- Fixed pre-existing lint error in `src/infrastructure/workers/worker-framework.ts:327` — `new Array()` replaced with `[]` literal.
+   119→   119→- Reworded comments in the new files to avoid the literal string `process.env` (the architecture checker uses a naive `/process\.env/g` regex that matches comments too).
+   120→   120→- Ran smoke tests via `bun ./tmp-test-*.ts` (scripts deleted after run): feature flags (boolean true, percentage ~500/500 split over 1000 ids, country allowlist allow/deny, kill-switch always false, reason strings), secrets (env read, JSON parse, validate present/missing, rotate no-op with warn log, chained fallback), config service (dot-notation, override survives reload, clear override reveals reloaded env value, getAll snapshot, ConfigPathNotFoundError, SecretRefSyncError on synchronous secret ref). All tests passed.
+   121→   121→
+   122→   122→Stage Summary:
+   123→   123→- Three infrastructure modules created:
+   124→   124→  1. `src/infrastructure/feature-flags/feature-flags.ts` — `CachedFeatureFlagService` + `InMemoryFeatureFlagStore`, 8 flag types (boolean, percentage, country, region, user, organization, time-window, kill-switch), per-context TTL cache with key-scoped or full invalidation, deterministic djb2-based percentage rollout.
+   125→   125→  2. `src/infrastructure/secrets/secret-provider.ts` — `EnvironmentSecretProvider` (env-backed, cached, with validators + optional prefix; rotate is a documented no-op), `ChainedSecretProvider` (first-hit-wins chain with proper error propagation), `SecretNotFoundError` / `SecretFormatError` error classes.
+   126→   126→  3. `src/infrastructure/config/config-service.ts` — `DefaultConfigService` extending shared/config with runtime overrides (survive reload), dot-notation access, `secret:` reference detection (sync error → use `getSecret()`), hot reload via `resetConfig()` + `loadConfig()` (re-validates), `getAll()` snapshot with overrides applied.
+   127→   127→- Added `getEnvVar()` / `requireEnvVar()` to `src/shared/config/index.ts` to keep all `process.env` access confined to the config layer (required for the secret provider to function without violating architecture boundaries).
+   128→   128→- `bun run lint` passes (0 errors). `bun run scripts/check-architecture.ts` passes (0 violations, 163 files scanned). No `any` types, no ES2015 namespaces, `import type` used for type-only imports throughout the new files.
+   129→   129→- Three pre-existing violations fixed in passing: redis-client.ts raw env access, scheduler cron comment parse error, worker-framework `new Array()` lint error.
+   130→   130→
+   131→   131→---
+   132→   132→Task ID: M2-4
+   133→   133→Agent: general-purpose
+   134→   134→Task: Build file storage + CDN + search infrastructure
+   135→   135→
+   136→   136→Work Log:
+   137→   137→- Read worklog.md to inherit the Milestone 1 architecture (DDD/CQRS/Event Sourcing, strict layer boundaries, architecture enforcement via scripts/check-architecture.ts).
+   138→   138→- Inspected existing infrastructure patterns (cache-provider.ts, redis-client.ts, lock-provider.ts) to match conventions: provider-interface + in-memory + production-backend pairs, dynamic imports for optional deps, `logger` / `getConfig` from shared, no `process.env`, no `any`.
+   139→   139→- Created `src/infrastructure/storage/storage-provider.ts` (615 lines): `StorageObject` / `UploadOptions` / `StorageProvider` interfaces exactly as specified; `LocalStorageProvider` (filesystem-backed, sidecar `.meta.json` files, MD5 etags, HMAC-SHA256 signed URLs with constant-time verification and a public `verifySignedUrl` helper for serving endpoints, path-traversal guards, recursive `list` with prefix filtering); `S3StorageProvider` (lazy `await import('@aws-sdk/client-s3')` + `@aws-sdk/s3-request-presigner` with clear "install this package" error if missing, minimal local type shapes so no `any`/`unknown` casting at call sites, supports S3-compatible APIs via `endpoint` + `forcePathStyle`, GetObject Body via `transformToByteArray`, HeadObject 404→null, ListObjectsV2).
+   140→   140→- Created `src/infrastructure/cdn/cdn-provider.ts` (237 lines): `CdnProvider` interface exactly as specified; `LocalCdnProvider` (deterministic SHA-1 version hash appended as `?v=…`, HMAC-SHA256 signed URLs with version+expires, no-op invalidate/purgeAll logged at debug); `CloudflareCdnProvider` (constructs `${baseUrl}/${key}?v=…` URLs, HMAC-signed URLs, calls Cloudflare REST API `POST /zones/{zoneId}/purge_cache` with 30-file batching for `invalidate`, `{purge_everything: true}` for `purgeAll`, validates `success` flag and surfaces API errors).
+   141→   141→- Created `src/infrastructure/search/search-provider.ts` (493 lines): `SearchDocument` / `SearchResult` / `SearchQuery` / `Indexer` / `SearchProvider` interfaces exactly as specified; `InMemorySearchProvider` with per-index inverted index (token → Map<docId, term frequency>), tokenisation (lowercase + non-alphanumeric split), TF-based scoring, filter operators ($eq/$ne/$gt/$gte/$lt/$lte/$in/$nin/$exists plus equality shorthand, array-membership semantics), sort (numeric vs lexical vs date with asc/desc), offset/limit pagination, faceting over the filtered candidate set, and HTML-escaped `<mark>` highlights capped at 3 snippets per field. `update()` removes old tokens before re-indexing so stale terms don't leak; `delete()` cleans postings and prunes empty token entries.
+   142→   142→- Verified with a Bun smoke test: full-text search returns ranked results; filters with $in+$lte+facets work; count returns the right number; update re-indexes (search "deluxe" finds the renamed doc); delete removes the doc (search "galactic" returns empty); LocalStorageProvider upload/download/stat/exists/signedUrl/verifySignedUrl/move/list/delete all work end-to-end; LocalCdnProvider getUrl/getVersion/getSignedUrl/invalidate/purgeAll all work.
+   143→   143→- Ran final checks: `bun run lint` → 0 errors. `bun run scripts/check-architecture.ts` → ✅ 0 violations across 163 files. TypeScript: my three files produce zero type errors (pre-existing errors in other agents' files e.g. scheduler/scheduler.ts, application/buses/*.ts are out of scope).
+   144→   144→
+   145→   145→Stage Summary:
+   146→   146→- Three new infrastructure modules created exactly at the requested paths (storage/storage-provider.ts, cdn/cdn-provider.ts, search/search-provider.ts) — 1345 lines total, all production-quality with proper error handling and JSDoc.
+   147→   147→- StorageProvider abstraction supports LocalStorageProvider (development / single-instance, HMAC-signed URLs) and S3StorageProvider (production, AWS SDK v3 dynamic import, S3-compatible APIs).
+   148→   148→- CdnProvider abstraction supports LocalCdnProvider (development) and CloudflareCdnProvider (production with real Cloudflare purge API).
+   149→   149→- SearchProvider abstraction provides a working InMemorySearchProvider (inverted index, TF scoring, filter operators, sorting, pagination, faceting, highlights) suitable for the demo; real backends (Meilisearch/Elasticsearch/Typesense) can be added later by implementing the same interface.
+   150→   150→- All architecture rules respected: `import type` for type-only imports, no `any`, no `process.env` (uses `getConfig().auth.secret` for HMAC defaults), no Prisma, infrastructure-only imports of shared/domain/application.
+   151→   151→- Functional smoke test passes end-to-end across all three modules.
+   152→   152→
+   153→   153→---
+   154→   154→Task ID: M2-3a
+   155→   155→Agent: general-purpose
+   156→   156→Task: Build worker framework + scheduler
+   157→   157→
+   158→   158→Work Log:
+   159→   159→- Read worklog.md to understand Milestone 1 architecture: clean DDD/CQRS/Event-Sourcing layers, DI container, OutboxPublisher/ProjectionEngine already running fire-and-forget loops, LockProvider interface exists in infrastructure/locking.
+   160→   160→- Created `/home/z/my-project/src/infrastructure/workers/worker-framework.ts`:
+   161→   161→  - `Worker` interface (name, pollIntervalMs, start/stop/isRunning/getHealth/processOnce)
+   162→   162→  - `WorkerHealth` snapshot interface (running, lastRunAt, lastError, totalProcessed, totalErrors, avgDurationMs)
+   163→   163→  - `WorkerLifecycle` interface (registerShutdownHook + shutdown)
+   164→   164→  - `WorkerMetrics` class — per-worker counters (runs, successes, failures, totalProcessed, totalDurationMs, lastRunAt, lastError) with register/recordRun/snapshot/reset
+   165→   165→  - `BaseWorker` abstract class — implements the polling loop with: configurable poll interval (absolute end-of-cycle bound so a slow batch doesn't drift the schedule), concurrency cap (max concurrent `processBatch` calls in flight tracked via `activeBatches` set), per-batch try/catch that records metrics without crashing the loop, graceful `stop()` that flips `running=false` and awaits all in-flight batches before resolving. Subclasses only implement `defaultPollIntervalMs()` and `processBatch()`.
+   166→   166→  - `WorkerRegistry` — owns all workers in the process, provides `register/get/startAll/stopAll/getHealth/list`, implements `WorkerLifecycle` (stops workers then runs registered shutdown hooks in registration order).
+   167→   167→- Created `/home/z/my-project/src/infrastructure/workers/workers.ts`:
+   168→   168→  - `OutboxWorker` wraps `OutboxPublisher.processBatch` (default poll interval from `getConfig().outbox.pollIntervalMs`).
+   169→   169→  - `ProjectionWorker` wraps `ProjectionEngine.processBatch` (default poll interval from `getConfig().projections.pollIntervalMs`).
+   170→   170→  - `CleanupWorker` purges (a) expired idempotency records via `IdempotencyStore.purgeExpired` (best-effort, type-guarded via `typeof === 'function'`), (b) published outbox messages older than `publishedOutboxRetentionMs` (default 7d), (c) failed outbox messages older than `failedOutboxRetentionMs` (default 30d). Default poll 5 min (non-urgent). Uses `getClient()` directly — allowed since we're inside infrastructure.
+   171→   171→  - `AnalyticsWorker` placeholder: polls the event store from a `lastRowId` checkpoint, counts events by type into an in-memory `Map<string, number>`, exposes `getEventCounts()` and `getTotalEvents()` for future /api/workers/analytics. Default poll 30s.
+   172→   172→  - `WORKER_TOKENS` const object with string tokens for the DI container (WorkerRegistry + each worker).
+   173→   173→- Created `/home/z/my-project/src/infrastructure/scheduler/scheduled-job-model.ts`:
+   174→   174→  - `JobScheduleKind` type (`'cron' | 'fixed_rate' | 'one_time'`).
+   175→   175→  - `ScheduledJobRecord` interface — the persisted shape (id, name, scheduleKind, scheduleValue as serialized string, priority, enabled, nextRunAt as epoch ms, lastRunAt, lastError, runCount, errorCount, createdAt, updatedAt). Includes a Prisma schema sketch in the docblock for the main agent to add to schema.prisma.
+   176→   176→  - `JobRunUpdate` patch interface for post-run state updates.
+   177→   177→  - `ScheduledJobStore` port interface (save/load/loadAll/loadDue/updateRunState/delete). `loadDue(now)` returns enabled jobs with `nextRunAt <= now`, sorted by priority desc then nextRunAt asc.
+   178→   178→  - `InMemoryScheduledJobStore` — single-instance implementation with the same priority-sorted `loadDue`.
+   179→   179→- Created `/home/z/my-project/src/infrastructure/scheduler/scheduler.ts`:
+   180→   180→  - `JobSchedule` discriminated union (`cron`/`fixed_rate`/`one_time`), `ScheduledJob` interface, `Scheduler` interface, `SchedulerOptions` (tickIntervalMs default 1s, lockTtlSeconds default 60s, optional store, required lockProvider).
+   181→   181→  - `CronField` — parses one cron field supporting wildcard, single values, ranges (`1-5`), lists (`1,3,5`), and step values (wildcard/15, 1-30/5). Validates bounds per field.
+   182→   182→  - `CronExpression` — parses 5-field cron (min hour dom month dow), implements standard OR semantics when both DoM and DoW are restricted, `matches(date)` and `nextRunAfter(fromMs)` that iterates minute-by-minute up to 4 years (~2.1M iterations cap) to handle leap-day expressions.
+   183→   183→  - `InMemoryScheduler` — tick-loop implementation using absolute timestamps (clock-drift safe: every decision compares `Date.now()` against persisted `nextRunAt`), priority-ordered dispatch (defensive re-sort on top of `loadDue`), distributed-lock coordination via `lockProvider.acquire('scheduler:job:<id>', lockTtlSeconds)` — skips the tick if another instance holds the lock, persists run state (runCount, errorCount, lastRunAt, nextRunAt) to the `ScheduledJobStore`, removes one-time jobs after execution, graceful `stop()` that awaits in-flight handler runs.
+   184→   184→  - `SCHEDULER_TOKENS` const object (Scheduler, ScheduledJobStore).
+   185→   185→- Verification:
+   186→   186→  - `bun run lint` → 0 errors (initially had a parsing error from a `*/15` substring in a JSDoc comment that closed the comment block early; rewrote the docstring to avoid the sequence).
+   187→   187→  - `bun run scripts/check-architecture.ts` → 0 violations (163 files scanned). All imports respect layer boundaries: scheduler/workers only import from infrastructure + shared + application ports; no `process.env` outside `shared/config`; no `any` in domain/shared.
+   188→   188→  - `bunx tsc --noEmit --skipLibCheck` → no errors in any of the 4 new files (pre-existing errors in storage-provider, telemetry/metrics, interfaces, shared/types/result are unrelated and out of scope).
+   189→   189→  - Fixed a TS2715 issue: removed `this.metrics.register(this.name)` from the `BaseWorker` constructor since `name` is an abstract property set by the subclass and not yet available at base-constructor time. Metrics auto-register on first `recordRun`/`snapshot` via `getOrCreate`.
+   190→   190→
+   191→   191→Stage Summary:
+   192→   192→- 4 new files created (~47 KB total): `worker-framework.ts`, `workers.ts`, `scheduler.ts`, `scheduled-job-model.ts`.
+   193→   193→- Worker framework provides a `BaseWorker` abstraction with health metrics, concurrency, graceful shutdown, and a `WorkerRegistry` lifecycle manager — existing `OutboxPublisher`/`ProjectionEngine` are wrapped as thin adapters so their existing `processBatch` methods become observable, controllable workers.
+   194→   194→- 4 concrete workers implemented: `OutboxWorker`, `ProjectionWorker`, `CleanupWorker` (idempotency + outbox retention purge), `AnalyticsWorker` (event-count placeholder with checkpoint).
+   195→   195→- Scheduler provides `cron` (custom 5-field parser), `fixed_rate`, and `one_time` job kinds with priority-ordered, distributed-lock-coordinated, clock-drift-safe execution and a pluggable persistence port (`ScheduledJobStore`) backed by an in-memory implementation.
+   196→   196→- All architecture + lint checks pass clean. No `process.env` outside shared/config, no Prisma outside infrastructure, no `any` types, no ES2015 namespaces, `import type` used for all type-only imports.
+   197→   197→- NEXT (for main agent): (1) Add the `ScheduledJob` Prisma model to `prisma/schema.prisma` (schema sketch in `scheduled-job-model.ts` docblock), then implement `PrismaScheduledJobStore`. (2) Wire `WORKER_TOKENS` and `SCHEDULER_TOKENS` into `composition-root.ts`: replace the existing fire-and-forget `startWorkers()` with `WorkerRegistry.startAll()`, register the four workers, and bind the scheduler. (3) Wire `WorkerRegistry.shutdown()` to SIGTERM/SIGINT handlers. (4) Optionally extend the `/api/workers` endpoints to surface `WorkerRegistry.getHealth()` and `Scheduler.listJobs()`.
+   198→   198→
+   199→   199→---
+   200→   200→Task ID: M2-3b
+   201→   201→Agent: general-purpose
+   202→   202→Task: Build message queue abstraction + dead letter queue
+   203→   203→
+   204→   204→Work Log:
+   205→   205→- Read worklog.md to understand the M1 architecture (DDD/CQRS/Event Sourcing/Outbox, clean architecture with shared→domain→application→infrastructure→interfaces layers, interface-driven infrastructure, architecture checker enforcing no Prisma outside infra / no process.env outside shared/config).
+   206→   206→- Inspected existing infrastructure patterns: `RedisClient` interface (in-memory + ioredis backends), `getClient()` from `@/infrastructure/database/prisma`, `withRetry` framework (exponential-jitter backoff), structured `logger` with scoped loggers (worker/event/system), `createId()` from `@/shared/ids`, `sleep`/`safeJsonParse` from `@/shared/utils`. Reviewed `OutboxPublisher` and `ProjectionEngine` as worker-pattern references.
+   207→   207→- Added `DeadLetterMessage` Prisma model to `prisma/schema.prisma` with BigInt columns for timestamps (firstFailedAt, lastFailedAt, expiresAt) — SQLite Int is 32-bit and overflows on Unix-ms timestamps. Ran `bun run db:generate` + `bun run db:push` to sync schema and regenerate the client.
+   208→   208→- Created `src/infrastructure/queue/message-queue.ts`:
+   209→   209→  - Exported the exact interfaces from the spec: `QueueMessage<T>`, `MessageConsumer<T>`, `MessageQueue`, `PublishOptions`, `NackOptions`.
+   210→   210→  - Exported constants: `PRIORITY_HEADER` ('x-priority'), `ERROR_HISTORY_HEADER` ('x-error-history'), `MAX_ATTEMPTS_DEFAULT` (5), `VISIBILITY_TIMEOUT_MS` (30s), `POLL_INTERVAL_MS` (100ms).
+   211→   211→  - `InMemoryQueue`: per-queue arrays sorted by priority (desc) then createdAt (asc); delayed delivery via `availableAt` checked by a setTimeout-based polling loop; visibility-timeout re-queue for stuck in-flight messages; auto-nack on consumer throw. `nack(requeue=true)` increments attempts and re-queues with optional delay; `retry()` is shorthand for immediate nack; `delay()` re-queues without incrementing; `stop()` clears timers.
+   212→   212→  - `RedisQueue`: uses the `RedisClient` abstraction (works with both real Redis and `InMemoryRedisClient` fallback). Simulates sorted sets (priority) and lists (FIFO) using JSON-encoded data structures keyed `queue:{name}:messages` (metadata array), `queue:{name}:msg:{id}` (full message), `queue:{name}:inflight` (in-flight map). Same dispatch/visibility-timeout semantics as InMemoryQueue.
+   213→   213→- Created `src/infrastructure/queue/dead-letter-queue.ts`:
+   214→   214→  - Exported the exact interfaces from the spec: `DeadLetterMessage`, `DlqErrorEntry`, `DeadLetterQueue`.
+   215→   215→  - Defined a `DeadLetterMessageRecord` interface (with BigInt timestamp fields) mirroring the Prisma model, so the module is self-documenting and decoupled from Prisma codegen.
+   216→   216→  - `PrismaDeadLetterQueue`: persists via `getClient().deadLetterMessage.*`. `send()` generates a `dlq_`-prefixed ID and sets firstFailedAt/lastFailedAt to now, status='pending'. `get()`/`list()` deserialize payload/headers/errorHistory from JSON. `replay()` publishes the payload back to the original queue and marks status='replayed'. `replayAll()` replays all pending entries for a given queue. `expire()` marks entries with `expiresAt < now` as 'expired' (audit trail preserved). `count()` returns pending count.
+   217→   217→  - `isPoison(message)`: returns true iff `attempts >= maxAttempts` AND the same error string appears 3+ times in the `x-error-history` header (parsed as `DlqErrorEntry[]`). Exports `POISON_REPEAT_THRESHOLD = 3` and `DEFAULT_DLQ_TTL_MS = 7 days`.
+   218→   218→- Created `src/infrastructure/queue/queue-worker.ts`:
+   219→   219→  - `QueueWorker` accepts a `MessageQueue`, a `DeadLetterQueue`, and options (concurrency, maxRetries, baseDelayMs, maxDelayMs, shutdownTimeoutMs).
+   220→   220→  - `register<T>(queue, handler)` collects handler registrations before `start()`.
+   221→   221→  - `start()` calls `mq.consume()` for each registration with a wrapped handler.
+   222→   222→  - Wrapped handler: checks `running` flag (nacks with delay if stopping), restores per-message error history from an in-memory Map, acquires a concurrency slot (simple semaphore via activeCount + sleep), then calls `processMessage`.
+   223→   223→  - `processMessage`: wraps the handler call in `withRetry()` (short-term transient retries within one delivery). On success → `ack` + clear error history. On failure → `handleFailure`.
+   224→   224→  - `handleFailure`: appends a `DlqErrorEntry` to the in-memory error history Map and syncs it to `message.headers[x-error-history]`. Computes `nextAttempts = attempts + 1`. If `nextAttempts >= maxAttempts` OR `dlq.isPoison(message)` → `sendToDlq` + `ack` (removes from queue). Otherwise → `nack` with exponential backoff (`baseDelayMs * 2^attempts`, capped at `maxDelayMs`).
+   225→   225→  - `sendToDlq`: calls `dlq.send()` with the original payload, headers, full error history, attempts, and a 7-day expiry.
+   226→   226→  - `stop()`: sets `running = false`, then waits up to `shutdownTimeoutMs` for in-flight messages to drain (graceful shutdown). Logs a warning if any remain.
+   227→   227→- Added the three queue modules to `src/infrastructure/index.ts` barrel export.
+   228→   228→- Fixed a TypeScript error in `InMemoryQueue.checkVisibilityTimeouts` (used `inflight` instead of `inflightMap` in a for-of destructuring).
+   229→   229→- Fixed a runtime error: changed `Int` → `BigInt` for DLQ timestamp columns in the Prisma schema (SQLite Int is 32-bit; Unix-ms timestamps overflow). Updated `PrismaDeadLetterQueue` to wrap writes with `BigInt(...)` and reads with `Number(...)`.
+   230→   230→- Ran smoke tests verifying: (1) InMemoryQueue + Worker processes a success message and routes a failing message to the DLQ after exactly `maxAttempts` deliveries; (2) RedisQueue processes messages with priority ordering; (3) DLQ `replay()` re-publishes and marks status='replayed'; (4) DLQ `expire()` marks expired entries; (5) `isPoison()` correctly identifies poison (3+ same errors + maxAttempts) and rejects non-poison (different errors, or attempts < max).
+   231→   231→- Verified: `bun run lint` — 0 errors. `bun run scripts/check-architecture.ts` — 0 violations (166 files scanned). `bunx tsc --noEmit --skipLibCheck` — 0 errors in queue files (pre-existing errors in other modules unchanged).
+   232→   232→
+   233→   233→Stage Summary:
+   234→   234→- Three new files created in `src/infrastructure/queue/`: `message-queue.ts` (InMemoryQueue + RedisQueue, ~630 lines), `dead-letter-queue.ts` (PrismaDeadLetterQueue + isPoison, ~285 lines), `queue-worker.ts` (QueueWorker with concurrency + graceful shutdown, ~260 lines).
+   235→   235→- Prisma schema extended with `DeadLetterMessage` model (BigInt timestamps, 3 indexes).
+   236→   236→- Full retry lifecycle implemented: short-term `withRetry` within a delivery → exponential-backoff `nack` across deliveries → DLQ routing when `maxAttempts` exhausted or poison detected.
+   237→   237→- All architecture rules respected: no `process.env` outside shared/config, no Prisma imports outside infrastructure, `import type` used for type-only imports, no `any` types, no ES2015 namespaces.
+   238→   238→- Lint passes (0 errors), architecture checker passes (0 violations, 166 files), TypeScript passes (0 errors in queue files).
+   239→   239→- Smoke-tested end-to-end: publish → consume → process → ack/nack → retry with backoff → DLQ routing → replay → expire → poison detection.
+   240→   240→

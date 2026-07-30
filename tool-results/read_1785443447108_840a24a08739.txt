@@ -1,0 +1,1560 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→import * as React from 'react'
+     4→     4→import { useToast } from '@/hooks/use-toast'
+     5→     5→import { Button } from '@/components/ui/button'
+     6→     6→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+     7→     7→import { Badge } from '@/components/ui/badge'
+     8→     8→import { Input } from '@/components/ui/input'
+     9→     9→import { Label } from '@/components/ui/label'
+    10→    10→import { Separator } from '@/components/ui/separator'
+    11→    11→import { ScrollArea } from '@/components/ui/scroll-area'
+    12→    12→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    13→    13→import {
+    14→    14→  Activity,
+    15→    15→  AlertCircle,
+    16→    16→  ArrowRight,
+    17→    17→  ArrowDown,
+    18→    18→  Boxes,
+    19→    19→  CheckCircle2,
+    20→    20→  Database,
+    21→    21→  GitBranch,
+    22→    22→  Layers,
+    23→    23→  Loader2,
+    24→    24→  RefreshCw,
+    25→    25→  Server,
+    26→    26→  Shield,
+    27→    27→  Terminal,
+    28→    28→  Zap,
+    29→    29→  Radio,
+    30→    30→  Cpu,
+    31→    31→  Network,
+    32→    32→  HardDrive,
+    33→    33→  Cloud,
+    34→    34→  Workflow,
+    35→    35→  Send,
+    36→    36→  Inbox,
+    37→    37→  Search,
+    38→    38→  CircleDot,
+    39→    39→  Clock,
+    40→    40→  Plug,
+    41→    41→} from 'lucide-react'
+    42→    42→
+    43→    43→// ─── Types ────────────────────────────────────────────────────────────────────
+    44→    44→
+    45→    45→interface HealthCheck {
+    46→    46→  name: string
+    47→    47→  status: 'healthy' | 'degraded' | 'unhealthy'
+    48→    48→  latencyMs: number
+    49→    49→  details?: Record<string, unknown>
+    50→    50→}
+    51→    51→
+    52→    52→interface HealthResponse {
+    53→    53→  status: 'healthy' | 'degraded' | 'unhealthy'
+    54→    54→  timestamp: string
+    55→    55→  checks: HealthCheck[]
+    56→    56→}
+    57→    57→
+    58→    58→interface ArchitectureBinding {
+    59→    59→  token: string
+    60→    60→  lifetime: string
+    61→    61→}
+    62→    62→
+    63→    63→interface ArchitectureResponse {
+    64→    64→  layers: string[]
+    65→    65→  eventTypes: string[]
+    66→    66→  commandTypes: string[]
+    67→    67→  queryTypes: string[]
+    68→    68→  bindings: ArchitectureBinding[]
+    69→    69→  timestamp: string
+    70→    70→}
+    71→    71→
+    72→    72→interface CommandResponse {
+    73→    73→  ok: boolean
+    74→    74→  data?: { gameId: string }
+    75→    75→  error?: string
+    76→    76→  code?: string
+    77→    77→  category?: string
+    78→    78→}
+    79→    79→
+    80→    80→interface QueryResponse {
+    81→    81→  ok: boolean
+    82→    82→  data?: GameView
+    83→    83→  error?: string
+    84→    84→  code?: string
+    85→    85→  category?: string
+    86→    86→}
+    87→    87→
+    88→    88→interface GameView {
+    89→    89→  gameId: string
+    90→    90→  title: string
+    91→    91→  creatorId: string
+    92→    92→  status: string
+    93→    93→  publishedAt: string | null
+    94→    94→}
+    95→    95→
+    96→    96→interface OutboxResponse {
+    97→    97→  published: number
+    98→    98→  pending: number
+    99→    99→  failed: number
+   100→   100→}
+   101→   101→
+   102→   102→interface ProjectionsResponse {
+   103→   103→  processed: number
+   104→   104→}
+   105→   105→
+   106→   106→// ─── Constants ────────────────────────────────────────────────────────────────
+   107→   107→
+   108→   108→const ARCHITECTURE_LAYERS = [
+   109→   109→  {
+   110→   110→    name: 'Shared',
+   111→   111→    icon: Boxes,
+   112→   112→    accent: 'emerald',
+   113→   113→    description: 'Cross-cutting primitives with zero domain dependencies.',
+   114→   114→    components: ['ids', 'types', 'Result', 'config', 'logging', 'utils'],
+   115→   115→  },
+   116→   116→  {
+   117→   117→    name: 'Domain',
+   118→   118→    icon: Shield,
+   119→   119→    accent: 'emerald',
+   120→   120→    description: 'Pure business model — the heart of the bounded context.',
+   121→   121→    components: ['AggregateRoot', 'Entity', 'ValueObject', 'DomainEvent', 'Repository', 'Specification'],
+   122→   122→  },
+   123→   123→  {
+   124→   124→    name: 'Application',
+   125→   125→    icon: Workflow,
+   126→   126→    accent: 'cyan',
+   127→   127→    description: 'Orchestrates use cases via buses and middleware pipelines.',
+   128→   128→    components: ['CommandBus', 'QueryBus', 'Pipelines', 'Handlers', 'Validation', 'Authorization'],
+   129→   129→  },
+   130→   130→  {
+   131→   131→    name: 'Infrastructure',
+   132→   132→    icon: Server,
+   133→   133→    accent: 'cyan',
+   134→   134→    description: 'Technical implementations of all application ports.',
+   135→   135→    components: ['EventStore', 'Outbox', 'EventBus', 'UoW', 'DI Container', 'Projections', 'Cache'],
+   136→   136→  },
+   137→   137→  {
+   138→   138→    name: 'Interfaces',
+   139→   139→    icon: Network,
+   140→   140→    accent: 'emerald',
+   141→   141→    description: 'Entry points — HTTP routes, health probes, and workers.',
+   142→   142→    components: ['API Routes', 'Health Checks', 'Workers'],
+   143→   143→  },
+   144→   144→] as const
+   145→   145→
+   146→   146→const COMMAND_PIPELINE = [
+   147→   147→  'Correlation',
+   148→   148→  'Logging',
+   149→   149→  'Metrics',
+   150→   150→  'Idempotency',
+   151→   151→  'Validation',
+   152→   152→  'Authorization',
+   153→   153→  'Transaction',
+   154→   154→  'Handler',
+   155→   155→]
+   156→   156→
+   157→   157→const QUERY_PIPELINE = ['Logging', 'Metrics', 'Cache', 'Handler']
+   158→   158→
+   159→   159→const COMPONENT_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+   160→   160→  database: Database,
+   161→   161→  'event-store': HardDrive,
+   162→   162→  'event-bus': Radio,
+   163→   163→  outbox: Inbox,
+   164→   164→  cache: Cpu,
+   165→   165→}
+   166→   166→
+   167→   167→// ─── Helpers ──────────────────────────────────────────────────────────────────
+   168→   168→
+   169→   169→function randomGameId(): string {
+   170→   170→  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+   171→   171→    return `game_${crypto.randomUUID().slice(0, 8)}`
+   172→   172→  }
+   173→   173→  return `game_${Math.random().toString(36).slice(2, 10)}`
+   174→   174→}
+   175→   175→
+   176→   176→function statusColor(status: string): string {
+   177→   177→  switch (status) {
+   178→   178→    case 'healthy':
+   179→   179→      return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
+   180→   180→    case 'degraded':
+   181→   181→      return 'text-amber-400 bg-amber-500/10 border-amber-500/30'
+   182→   182→    case 'unhealthy':
+   183→   183→      return 'text-rose-400 bg-rose-500/10 border-rose-500/30'
+   184→   184→    default:
+   185→   185→      return 'text-zinc-400 bg-zinc-500/10 border-zinc-500/30'
+   186→   186→  }
+   187→   187→}
+   188→   188→
+   189→   189→function StatusDot({ status }: { status: string }) {
+   190→   190→  const color =
+   191→   191→    status === 'healthy'
+   192→   192→      ? 'bg-emerald-400'
+   193→   193→      : status === 'degraded'
+   194→   194→      ? 'bg-amber-400'
+   195→   195→      : 'bg-rose-400'
+   196→   196→  return (
+   197→   197→    <span className="relative flex h-2.5 w-2.5">
+   198→   198→      <span
+   199→   199→        className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 ${color}`}
+   200→   200→      />
+   201→   201→      <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${color}`} />
+   202→   202→    </span>
+   203→   203→  )
+   204→   204→}
+   205→   205→
+   206→   206→function accentClasses(accent: string): { text: string; bg: string; border: string; ring: string } {
+   207→   207→  if (accent === 'cyan') {
+   208→   208→    return {
+   209→   209→      text: 'text-cyan-400',
+   210→   210→      bg: 'bg-cyan-500/10',
+   211→   211→      border: 'border-cyan-500/30',
+   212→   212→      ring: 'ring-cyan-500/20',
+   213→   213→    }
+   214→   214→  }
+   215→   215→  return {
+   216→   216→    text: 'text-emerald-400',
+   217→   217→    bg: 'bg-emerald-500/10',
+   218→   218→    border: 'border-emerald-500/30',
+   219→   219→    ring: 'ring-emerald-500/20',
+   220→   220→  }
+   221→   221→}
+   222→   222→
+   223→   223→// ─── Page ─────────────────────────────────────────────────────────────────────
+   224→   224→
+   225→   225→export default function Home() {
+   226→   226→  return (
+   227→   227→    <div className="dark flex min-h-screen flex-col bg-slate-950 text-zinc-100">
+   228→   228→      <BackgroundGrid />
+   229→   229→      <div className="relative flex flex-1 flex-col">
+   230→   230→        <Header />
+   231→   231→        <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-10 sm:px-6 lg:px-8">
+   232→   232→          <ArchitectureLayers />
+   233→   233→          <Separator className="my-12 bg-slate-800" />
+   234→   234→          <HealthDashboard />
+   235→   235→          <Separator className="my-12 bg-slate-800" />
+   236→   236→          <EventSourcingDemo />
+   237→   237→          <Separator className="my-12 bg-slate-800" />
+   238→   238→          <RegistryDisplay />
+   239→   239→          <Separator className="my-12 bg-slate-800" />
+   240→   240→          <PipelineVisualization />
+   241→   241→        </main>
+   242→   242→        <Footer />
+   243→   243→      </div>
+   244→   244→    </div>
+   245→   245→  )
+   246→   246→}
+   247→   247→
+   248→   248→// ─── Background ───────────────────────────────────────────────────────────────
+   249→   249→
+   250→   250→function BackgroundGrid() {
+   251→   251→  return (
+   252→   252→    <div
+   253→   253→      aria-hidden
+   254→   254→      className="pointer-events-none absolute inset-0 z-0 h-full w-full bg-[linear-gradient(to_right,rgba(16,185,129,0.04)_1px,transparent_1px),linear-gradient(to_bottom,rgba(16,185,129,0.04)_1px,transparent_1px)] bg-[size:48px_48px]"
+   255→   255→    >
+   256→   256→      <div className="absolute inset-0 bg-gradient-to-b from-slate-950/0 via-slate-950/40 to-slate-950" />
+   257→   257→      <div className="absolute -top-40 left-1/2 h-80 w-[40rem] -translate-x-1/2 rounded-full bg-emerald-500/10 blur-3xl" />
+   258→   258→      <div className="absolute top-1/3 -right-40 h-72 w-72 rounded-full bg-cyan-500/10 blur-3xl" />
+   259→   259→    </div>
+   260→   260→  )
+   261→   261→}
+   262→   262→
+   263→   263→// ─── Header / Hero ────────────────────────────────────────────────────────────
+   264→   264→
+   265→   265→function Header() {
+   266→   266→  return (
+   267→   267→    <header className="relative border-b border-slate-800/80 bg-slate-950/60 backdrop-blur-sm">
+   268→   268→      <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-12 sm:px-6 lg:px-8 lg:py-16">
+   269→   269→        <div className="flex flex-wrap items-center gap-3 text-xs font-mono uppercase tracking-[0.25em] text-emerald-400/80">
+   270→   270→          <span className="inline-flex items-center gap-1.5">
+   271→   271→            <CircleDot className="h-3.5 w-3.5" />
+   272→   272→            playliquid
+   273→   273→          </span>
+   274→   274→          <span className="text-slate-600">/</span>
+   275→   275→          <span className="text-slate-400">milestone 1</span>
+   276→   276→        </div>
+   277→   277→        <div className="flex flex-col gap-4">
+   278→   278→          <h1 className="font-mono text-4xl font-bold tracking-tight text-zinc-50 sm:text-5xl lg:text-6xl">
+   279→   279→            Play<span className="text-emerald-400">Liquid</span>
+   280→   280→          </h1>
+   281→   281→          <p className="font-mono text-base text-cyan-300/90 sm:text-lg">
+   282→   282→            Production-Grade Event-Driven Architecture
+   283→   283→          </p>
+   284→   284→          <p className="max-w-3xl text-sm text-slate-400 sm:text-base">
+   285→   285→            A reference implementation of a gaming platform built on strict
+   286→   286→            Domain-Driven Design, Command-Query Responsibility Segregation,
+   287→   287→            Event Sourcing, and the Transactional Outbox pattern.
+   288→   288→          </p>
+   289→   289→          <div className="flex flex-wrap items-center gap-2 pt-2 font-mono text-xs text-slate-400">
+   290→   290→            <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
+   291→   291→              DDD
+   292→   292→            </Badge>
+   293→   293→            <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
+   294→   294→              CQRS
+   295→   295→            </Badge>
+   296→   296→            <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-300">
+   297→   297→              Event Sourcing
+   298→   298→            </Badge>
+   299→   299→            <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-300">
+   300→   300→              Outbox Pattern
+   301→   301→            </Badge>
+   302→   302→          </div>
+   303→   303→        </div>
+   304→   304→        <div className="flex flex-wrap items-center gap-3 pt-2">
+   305→   305→          <Badge
+   306→   306→            variant="outline"
+   307→   307→            className="gap-1.5 border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-emerald-300"
+   308→   308→          >
+   309→   309→            <CheckCircle2 className="h-3.5 w-3.5" />
+   310→   310→            Boundaries Verified
+   311→   311→          </Badge>
+   312→   312→          <Badge
+   313→   313→            variant="outline"
+   314→   314→            className="gap-1.5 border-slate-700 bg-slate-900/60 px-3 py-1 font-mono text-slate-400"
+   315→   315→          >
+   316→   316→            <Layers className="h-3.5 w-3.5" />
+   317→   317→            5-Layer Onion
+   318→   318→          </Badge>
+   319→   319→          <Badge
+   320→   320→            variant="outline"
+   321→   321→            className="gap-1.5 border-slate-700 bg-slate-900/60 px-3 py-1 font-mono text-slate-400"
+   322→   322→          >
+   323→   323→            <GitBranch className="h-3.5 w-3.5" />
+   324→   324→            Strict Dependency Rules
+   325→   325→          </Badge>
+   326→   326→        </div>
+   327→   327→      </div>
+   328→   328→    </header>
+   329→   329→  )
+   330→   330→}
+   331→   331→
+   332→   332→// ─── Architecture Layers ──────────────────────────────────────────────────────
+   333→   333→
+   334→   334→function ArchitectureLayers() {
+   335→   335→  return (
+   336→   336→    <section id="architecture" className="scroll-mt-8">
+   337→   337→      <SectionHeading
+   338→   338→        index="01"
+   339→   339→        title="Architecture Layers"
+   340→   340→        description="A strict onion architecture — each layer may only depend on layers below it. Boundary rules are enforced by ESLint and a CI checker."
+   341→   341→        icon={Layers}
+   342→   342→      />
+   343→   343→      <div className="mt-8 grid gap-4 lg:grid-cols-5">
+   344→   344→        {ARCHITECTURE_LAYERS.map((layer, idx) => {
+   345→   345→          const Icon = layer.icon
+   346→   346→          const accent = accentClasses(layer.accent)
+   347→   347→          return (
+   348→   348→            <Card
+   349→   349→              key={layer.name}
+   350→   350→              className={`relative border-slate-800 bg-slate-900/50 py-5 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60 transition-colors hover:border-slate-700`}
+   351→   351→            >
+   352→   352→              <CardHeader className="gap-3 px-5">
+   353→   353→                <div className="flex items-center justify-between">
+   354→   354→                  <div
+   355→   355→                    className={`flex h-9 w-9 items-center justify-center rounded-lg ${accent.bg} ${accent.border} border ring-1 ring-inset ${accent.ring}`}
+   356→   356→                  >
+   357→   357→                    <Icon className={`h-4.5 w-4.5 ${accent.text}`} />
+   358→   358→                  </div>
+   359→   359→                  <span className="font-mono text-[10px] uppercase tracking-widest text-slate-600">
+   360→   360→                    L{idx + 1}
+   361→   361→                  </span>
+   362→   362→                </div>
+   363→   363→                <CardTitle className="font-mono text-base text-zinc-100">
+   364→   364→                  {layer.name}
+   365→   365→                </CardTitle>
+   366→   366→                <CardDescription className="text-xs text-slate-400">
+   367→   367→                  {layer.description}
+   368→   368→                </CardDescription>
+   369→   369→              </CardHeader>
+   370→   370→              <CardContent className="px-5">
+   371→   371→                <div className="flex flex-wrap gap-1.5">
+   372→   372→                  {layer.components.map((c) => (
+   373→   373→                    <Badge
+   374→   374→                      key={c}
+   375→   375→                      variant="outline"
+   376→   376→                      className={`border-slate-700 bg-slate-950/60 px-2 py-0.5 font-mono text-[10px] text-slate-300`}
+   377→   377→                    >
+   378→   378→                      {c}
+   379→   379→                    </Badge>
+   380→   380→                  ))}
+   381→   381→                </div>
+   382→   382→              </CardContent>
+   383→   383→              {idx < ARCHITECTURE_LAYERS.length - 1 && (
+   384→   384→                <div className="absolute -right-2 top-1/2 z-10 hidden -translate-y-1/2 lg:block">
+   385→   385→                  <ArrowRight className="h-4 w-4 text-slate-700" />
+   386→   386→                </div>
+   387→   387→              )}
+   388→   388→            </Card>
+   389→   389→          )
+   390→   390→        })}
+   391→   391→      </div>
+   392→   392→      <div className="mt-4 flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/40 px-4 py-3 font-mono text-xs text-slate-400">
+   393→   393→        <Terminal className="h-3.5 w-3.5 text-emerald-400" />
+   394→   394→        <span>
+   395→   395→          Dependency direction:{' '}
+   396→   396→          <span className="text-emerald-300">Shared</span> ←{' '}
+   397→   397→          <span className="text-emerald-300">Domain</span> ←{' '}
+   398→   398→          <span className="text-cyan-300">Application</span> ←{' '}
+   399→   399→          <span className="text-cyan-300">Infrastructure</span> ←{' '}
+   400→   400→          <span className="text-emerald-300">Interfaces</span>
+   401→   401→        </span>
+   402→   402→      </div>
+   403→   403→    </section>
+   404→   404→  )
+   405→   405→}
+   406→   406→
+   407→   407→// ─── Health Dashboard ─────────────────────────────────────────────────────────
+   408→   408→
+   409→   409→function HealthDashboard() {
+   410→   410→  const { toast } = useToast()
+   411→   411→  const [health, setHealth] = React.useState<HealthResponse | null>(null)
+   412→   412→  const [error, setError] = React.useState<string | null>(null)
+   413→   413→  const [loading, setLoading] = React.useState(true)
+   414→   414→  const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null)
+   415→   415→  const [paused, setPaused] = React.useState(false)
+   416→   416→
+   417→   417→  const fetchHealth = React.useCallback(async () => {
+   418→   418→    try {
+   419→   419→      const res = await fetch('/api/health', { cache: 'no-store' })
+   420→   420→      if (!res.ok) {
+   421→   421→        throw new Error(`HTTP ${res.status}`)
+   422→   422→      }
+   423→   423→      const data = (await res.json()) as HealthResponse
+   424→   424→      setHealth(data)
+   425→   425→      setError(null)
+   426→   426→      setLastUpdated(new Date())
+   427→   427→    } catch (e) {
+   428→   428→      const msg = e instanceof Error ? e.message : 'Failed to fetch health'
+   429→   429→      setError(msg)
+   430→   430→    } finally {
+   431→   431→      setLoading(false)
+   432→   432→    }
+   433→   433→  }, [])
+   434→   434→
+   435→   435→  React.useEffect(() => {
+   436→   436→    void fetchHealth()
+   437→   437→    if (paused) return
+   438→   438→    const interval = setInterval(() => void fetchHealth(), 5000)
+   439→   439→    return () => clearInterval(interval)
+   440→   440→  }, [fetchHealth, paused])
+   441→   441→
+   442→   442→  const overall = health?.status ?? 'unhealthy'
+   443→   443→
+   444→   444→  const handleRefresh = () => {
+   445→   445→    setLoading(true)
+   446→   446→    void fetchHealth()
+   447→   447→    toast({
+   448→   448→      title: 'Health refreshed',
+   449→   449→      description: 'Re-ran all infrastructure health checks.',
+   450→   450→    })
+   451→   451→  }
+   452→   452→
+   453→   453→  return (
+   454→   454→    <section id="health" className="scroll-mt-8">
+   455→   455→      <SectionHeading
+   456→   456→        index="02"
+   457→   457→        title="Live Health Dashboard"
+   458→   458→        description="Real-time status of every infrastructure component. Auto-refreshes every 5 seconds."
+   459→   459→        icon={Activity}
+   460→   460→        action={
+   461→   461→          <div className="flex items-center gap-2">
+   462→   462→            <Button
+   463→   463→              variant="outline"
+   464→   464→              size="sm"
+   465→   465→              onClick={() => setPaused((p) => !p)}
+   466→   466→              className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-300 hover:bg-slate-800 hover:text-zinc-100"
+   467→   467→            >
+   468→   468→              {paused ? 'Resume' : 'Pause'}
+   469→   469→            </Button>
+   470→   470→            <Button
+   471→   471→              variant="outline"
+   472→   472→              size="sm"
+   473→   473→              onClick={handleRefresh}
+   474→   474→              disabled={loading}
+   475→   475→              className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-300 hover:bg-slate-800 hover:text-zinc-100"
+   476→   476→            >
+   477→   477→              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+   478→   478→              Refresh
+   479→   479→            </Button>
+   480→   480→          </div>
+   481→   481→        }
+   482→   482→      />
+   483→   483→
+   484→   484→      <div className="mt-8 grid gap-4 lg:grid-cols-[1.2fr_2fr]">
+   485→   485→        {/* Overall status */}
+   486→   486→        <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+   487→   487→          <CardHeader>
+   488→   488→            <div className="flex items-center justify-between">
+   489→   489→              <CardTitle className="font-mono text-sm uppercase tracking-wider text-slate-300">
+   490→   490→                Overall Status
+   491→   491→              </CardTitle>
+   492→   492→              <StatusDot status={overall} />
+   493→   493→            </div>
+   494→   494→            <CardDescription className="text-xs">
+   495→   495→              Aggregated from all registered health checks.
+   496→   496→            </CardDescription>
+   497→   497→          </CardHeader>
+   498→   498→          <CardContent className="space-y-4">
+   499→   499→            <div
+   500→   500→              className={`rounded-lg border px-4 py-3 ${statusColor(overall)}`}
+   501→   501→            >
+   502→   502→              <div className="flex items-center justify-between">
+   503→   503→                <span className="font-mono text-2xl font-bold uppercase">
+   504→   504→                  {loading && !health ? '...' : overall}
+   505→   505→                </span>
+   506→   506→                <Activity className="h-5 w-5 opacity-70" />
+   507→   507→              </div>
+   508→   508→            </div>
+   509→   509→            <div className="grid grid-cols-2 gap-2 font-mono text-xs">
+   510→   510→              <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2">
+   511→   511→                <div className="text-slate-500">Checks</div>
+   512→   512→                <div className="text-zinc-200">{health?.checks.length ?? 0}</div>
+   513→   513→              </div>
+   514→   514→              <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2">
+   515→   515→                <div className="text-slate-500">Last Updated</div>
+   516→   516→                <div className="text-zinc-200">
+   517→   517→                  {lastUpdated ? lastUpdated.toLocaleTimeString() : '—'}
+   518→   518→                </div>
+   519→   519→              </div>
+   520→   520→            </div>
+   521→   521→            {error && (
+   522→   522→              <div className="flex items-start gap-2 rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+   523→   523→                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+   524→   524→                <span className="font-mono">{error}</span>
+   525→   525→              </div>
+   526→   526→            )}
+   527→   527→          </CardContent>
+   528→   528→        </Card>
+   529→   529→
+   530→   530→        {/* Per-component */}
+   531→   531→        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+   532→   532→          {loading && !health ? (
+   533→   533→            <HealthCardSkeletons />
+   534→   534→          ) : health && health.checks.length > 0 ? (
+   535→   535→            health.checks.map((check) => (
+   536→   536→              <HealthCheckCard key={check.name} check={check} />
+   537→   537→            ))
+   538→   538→          ) : (
+   539→   539→            <div className="col-span-full flex items-center justify-center rounded-lg border border-dashed border-slate-800 py-12 text-sm text-slate-500">
+   540→   540→              No health checks registered.
+   541→   541→            </div>
+   542→   542→          )}
+   543→   543→        </div>
+   544→   544→      </div>
+   545→   545→    </section>
+   546→   546→  )
+   547→   547→}
+   548→   548→
+   549→   549→function HealthCheckCard({ check }: { check: HealthCheck }) {
+   550→   550→  const Icon = COMPONENT_ICONS[check.name] ?? Server
+   551→   551→  const details = check.details ?? {}
+   552→   552→  return (
+   553→   553→    <Card className="border-slate-800 bg-slate-900/40 py-4 ring-1 ring-inset ring-slate-800/40">
+   554→   554→      <CardHeader className="gap-2 px-4">
+   555→   555→        <div className="flex items-center justify-between gap-2">
+   556→   556→          <div className="flex items-center gap-2">
+   557→   557→            <div className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-700 bg-slate-950/60">
+   558→   558→              <Icon className="h-3.5 w-3.5 text-slate-300" />
+   559→   559→            </div>
+   560→   560→            <span className="font-mono text-sm text-zinc-100">{check.name}</span>
+   561→   561→          </div>
+   562→   562→          <StatusDot status={check.status} />
+   563→   563→        </div>
+   564→   564→      </CardHeader>
+   565→   565→      <CardContent className="space-y-2 px-4">
+   566→   566→        <div className="flex items-center justify-between font-mono text-xs">
+   567→   567→          <span className="text-slate-500">Status</span>
+   568→   568→          <span
+   569→   569→            className={`rounded border px-1.5 py-0.5 uppercase ${statusColor(check.status)}`}
+   570→   570→          >
+   571→   571→            {check.status}
+   572→   572→          </span>
+   573→   573→        </div>
+   574→   574→        <div className="flex items-center justify-between font-mono text-xs">
+   575→   575→          <span className="text-slate-500">Latency</span>
+   576→   576→          <span className="text-cyan-300">{check.latencyMs} ms</span>
+   577→   577→        </div>
+   578→   578→        {Object.keys(details).length > 0 && (
+   579→   579→          <div className="mt-2 border-t border-slate-800 pt-2">
+   580→   580→            <pre className="overflow-x-auto font-mono text-[10px] leading-tight text-slate-400">
+   581→   581→              {JSON.stringify(details, null, 2)}
+   582→   582→            </pre>
+   583→   583→          </div>
+   584→   584→        )}
+   585→   585→      </CardContent>
+   586→   586→    </Card>
+   587→   587→  )
+   588→   588→}
+   589→   589→
+   590→   590→function HealthCardSkeletons() {
+   591→   591→  return (
+   592→   592→    <>
+   593→   593→      {Array.from({ length: 5 }).map((_, i) => (
+   594→   594→        <Card
+   595→   595→          key={i}
+   596→   596→          className="border-slate-800 bg-slate-900/40 py-4 ring-1 ring-inset ring-slate-800/40"
+   597→   597→        >
+   598→   598→          <CardContent className="flex items-center gap-2 px-4">
+   599→   599→            <Loader2 className="h-4 w-4 animate-spin text-emerald-400/60" />
+   600→   600→            <span className="font-mono text-xs text-slate-500">Loading…</span>
+   601→   601→          </CardContent>
+   602→   602→        </Card>
+   603→   603→      ))}
+   604→   604→    </>
+   605→   605→  )
+   606→   606→}
+   607→   607→
+   608→   608→// ─── Event Sourcing Demo ──────────────────────────────────────────────────────
+   609→   609→
+   610→   610→type StepStatus = 'pending' | 'running' | 'success' | 'error'
+   611→   611→
+   612→   612→interface StepState {
+   613→   613→  status: StepStatus
+   614→   614→  result?: unknown
+   615→   615→  error?: string
+   616→   616→  timestamp?: string
+   617→   617→}
+   618→   618→
+   619→   619→function EventSourcingDemo() {
+   620→   620→  const { toast } = useToast()
+   621→   621→  const [gameId, setGameId] = React.useState('')
+   622→   622→  const [title, setTitle] = React.useState('')
+   623→   623→  const [creatorId, setCreatorId] = React.useState('')
+   624→   624→  const [steps, setSteps] = React.useState<Record<number, StepState>>({
+   625→   625→    1: { status: 'pending' },
+   626→   626→    2: { status: 'pending' },
+   627→   627→    3: { status: 'pending' },
+   628→   628→    4: { status: 'pending' },
+   629→   629→  })
+   630→   630→
+   631→   631→  React.useEffect(() => {
+   632→   632→    setGameId(randomGameId())
+   633→   633→    setCreatorId(`creator_${Math.random().toString(36).slice(2, 8)}`)
+   634→   634→    setTitle('Liquid Tournament — Season 1')
+   635→   635→  }, [])
+   636→   636→
+   637→   637→  const updateStep = (n: number, patch: Partial<StepState>) =>
+   638→   638→    setSteps((s) => ({ ...s, [n]: { ...s[n], ...patch } }))
+   639→   639→
+   640→   640→  const resetSteps = (keepCommand = false) =>
+   641→   641→    setSteps({
+   642→   642→      1: keepCommand ? steps[1] : { status: 'pending' },
+   643→   643→      2: { status: 'pending' },
+   644→   644→      3: { status: 'pending' },
+   645→   645→      4: { status: 'pending' },
+   646→   646→    })
+   647→   647→
+   648→   648→  // Step 1: Dispatch command
+   649→   649→  const handleDispatch = async () => {
+   650→   650→    if (!gameId.trim() || !title.trim() || !creatorId.trim()) {
+   651→   651→      toast({
+   652→   652→        title: 'Validation error',
+   653→   653→        description: 'Game ID, Title, and Creator ID are all required.',
+   654→   654→        variant: 'destructive',
+   655→   655→      })
+   656→   656→      return
+   657→   657→    }
+   658→   658→    updateStep(1, { status: 'running', error: undefined, result: undefined })
+   659→   659→    try {
+   660→   660→      const res = await fetch('/api/commands', {
+   661→   661→        method: 'POST',
+   662→   662→        headers: { 'Content-Type': 'application/json' },
+   663→   663→        body: JSON.stringify({
+   664→   664→          commandType: 'PublishGame',
+   665→   665→          payload: { gameId, title, creatorId },
+   666→   666→        }),
+   667→   667→      })
+   668→   668→      const data = (await res.json()) as CommandResponse
+   669→   669→      if (!data.ok) {
+   670→   670→        throw new Error(data.error ?? 'Command failed')
+   671→   671→      }
+   672→   672→      updateStep(1, {
+   673→   673→        status: 'success',
+   674→   674→        result: data.data,
+   675→   675→        timestamp: new Date().toISOString(),
+   676→   676→      })
+   677→   677→      // Reset downstream steps since we have new events
+   678→   678→      setSteps((s) => ({
+   679→   679→        1: s[1],
+   680→   680→        2: { status: 'pending' },
+   681→   681→        3: { status: 'pending' },
+   682→   682→        4: { status: 'pending' },
+   683→   683→      }))
+   684→   684→      toast({
+   685→   685→        title: 'Command dispatched',
+   686→   686→        description: `PublishGame appended to stream GameAggregate:${gameId}`,
+   687→   687→      })
+   688→   688→    } catch (e) {
+   689→   689→      const msg = e instanceof Error ? e.message : 'Unknown error'
+   690→   690→      updateStep(1, { status: 'error', error: msg })
+   691→   691→      toast({ title: 'Command failed', description: msg, variant: 'destructive' })
+   692→   692→    }
+   693→   693→  }
+   694→   694→
+   695→   695→  // Step 2: Process outbox
+   696→   696→  const handleOutbox = async () => {
+   697→   697→    updateStep(2, { status: 'running', error: undefined, result: undefined })
+   698→   698→    try {
+   699→   699→      const res = await fetch('/api/workers/outbox', { method: 'POST' })
+   700→   700→      const data = (await res.json()) as OutboxResponse
+   701→   701→      updateStep(2, {
+   702→   702→        status: 'success',
+   703→   703→        result: data,
+   704→   704→        timestamp: new Date().toISOString(),
+   705→   705→      })
+   706→   706→      toast({
+   707→   707→        title: 'Outbox processed',
+   708→   708→        description: `Published ${data.published} event(s).`,
+   709→   709→      })
+   710→   710→    } catch (e) {
+   711→   711→      const msg = e instanceof Error ? e.message : 'Unknown error'
+   712→   712→      updateStep(2, { status: 'error', error: msg })
+   713→   713→      toast({ title: 'Outbox failed', description: msg, variant: 'destructive' })
+   714→   714→    }
+   715→   715→  }
+   716→   716→
+   717→   717→  // Step 3: Run projections
+   718→   718→  const handleProjections = async () => {
+   719→   719→    updateStep(3, { status: 'running', error: undefined, result: undefined })
+   720→   720→    try {
+   721→   721→      const res = await fetch('/api/workers/projections', { method: 'POST' })
+   722→   722→      const data = (await res.json()) as ProjectionsResponse
+   723→   723→      updateStep(3, {
+   724→   724→        status: 'success',
+   725→   725→        result: data,
+   726→   726→        timestamp: new Date().toISOString(),
+   727→   727→      })
+   728→   728→      toast({
+   729→   729→        title: 'Projections ran',
+   730→   730→        description: `Projected ${data.processed} event(s) into read models.`,
+   731→   731→      })
+   732→   732→    } catch (e) {
+   733→   733→      const msg = e instanceof Error ? e.message : 'Unknown error'
+   734→   734→      updateStep(3, { status: 'error', error: msg })
+   735→   735→      toast({
+   736→   736→        title: 'Projections failed',
+   737→   737→        description: msg,
+   738→   738→        variant: 'destructive',
+   739→   739→      })
+   740→   740→    }
+   741→   741→  }
+   742→   742→
+   743→   743→  // Step 4: Query read model
+   744→   744→  const handleQuery = async () => {
+   745→   745→    updateStep(4, { status: 'running', error: undefined, result: undefined })
+   746→   746→    try {
+   747→   747→      const res = await fetch('/api/queries', {
+   748→   748→        method: 'POST',
+   749→   749→        headers: { 'Content-Type': 'application/json' },
+   750→   750→        body: JSON.stringify({
+   751→   751→          queryType: 'GetGame',
+   752→   752→          payload: { gameId },
+   753→   753→        }),
+   754→   754→      })
+   755→   755→      const data = (await res.json()) as QueryResponse
+   756→   756→      if (!data.ok) {
+   757→   757→        throw new Error(data.error ?? 'Query failed')
+   758→   758→      }
+   759→   759→      updateStep(4, {
+   760→   760→        status: 'success',
+   761→   761→        result: data.data,
+   762→   762→        timestamp: new Date().toISOString(),
+   763→   763→      })
+   764→   764→      toast({
+   765→   765→        title: 'Query executed',
+   766→   766→        description: `Read model returned for game ${gameId}.`,
+   767→   767→      })
+   768→   768→    } catch (e) {
+   769→   769→      const msg = e instanceof Error ? e.message : 'Unknown error'
+   770→   770→      updateStep(4, { status: 'error', error: msg })
+   771→   771→      toast({ title: 'Query failed', description: msg, variant: 'destructive' })
+   772→   772→    }
+   773→   773→  }
+   774→   774→
+   775→   775→  const resetAll = () => {
+   776→   776→    setGameId(randomGameId())
+   777→   777→    setCreatorId(`creator_${Math.random().toString(36).slice(2, 8)}`)
+   778→   778→    setTitle('Liquid Tournament — Season 1')
+   779→   779→    resetSteps(false)
+   780→   780→  }
+   781→   781→
+   782→   782→  return (
+   783→   783→    <section id="demo" className="scroll-mt-8">
+   784→   784→      <SectionHeading
+   785→   785→        index="03"
+   786→   786→        title="Event Sourcing Demo"
+   787→   787→        description="Dispatch a command, publish the outbox, run projections, then query the materialized read model — the full CQRS + Event Sourcing round trip."
+   788→   788→        icon={Zap}
+   789→   789→        action={
+   790→   790→          <Button
+   791→   791→            variant="ghost"
+   792→   792→            size="sm"
+   793→   793→            onClick={resetAll}
+   794→   794→            className="font-mono text-xs text-slate-400 hover:bg-slate-800/60 hover:text-zinc-100"
+   795→   795→          >
+   796→   796→            <RefreshCw className="h-3.5 w-3.5" />
+   797→   797→            Reset
+   798→   798→          </Button>
+   799→   799→        }
+   800→   800→      />
+   801→   801→
+   802→   802→      {/* Flow indicator */}
+   803→   803→      <FlowIndicator steps={steps} />
+   804→   804→
+   805→   805→      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+   806→   806→        {/* Step 1: Dispatch Command */}
+   807→   807→        <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+   808→   808→          <CardHeader>
+   809→   809→            <StepHeader
+   810→   810→              n={1}
+   811→   811→              title="Dispatch Command"
+   812→   812→              subtitle="POST /api/commands"
+   813→   813→              icon={Send}
+   814→   814→              status={steps[1].status}
+   815→   815→            />
+   816→   816→            <CardDescription className="text-xs">
+   817→   817→              Validates payload, runs authorization, opens a transaction,
+   818→   818→              appends events to the EventStore, and writes to the Outbox — all
+   819→   819→              atomically.
+   820→   820→            </CardDescription>
+   821→   821→          </CardHeader>
+   822→   822→          <CardContent className="space-y-3">
+   823→   823→            <div className="grid gap-2">
+   824→   824→              <Label htmlFor="gameId" className="font-mono text-xs text-slate-400">
+   825→   825→                Game ID
+   826→   826→              </Label>
+   827→   827→              <Input
+   828→   828→                id="gameId"
+   829→   829→                value={gameId}
+   830→   830→                onChange={(e) => setGameId(e.target.value)}
+   831→   831→                className="border-slate-700 bg-slate-950/60 font-mono text-xs text-emerald-300 focus-visible:ring-emerald-500/30"
+   832→   832→                spellCheck={false}
+   833→   833→              />
+   834→   834→            </div>
+   835→   835→            <div className="grid gap-2">
+   836→   836→              <Label htmlFor="title" className="font-mono text-xs text-slate-400">
+   837→   837→                Title
+   838→   838→              </Label>
+   839→   839→              <Input
+   840→   840→                id="title"
+   841→   841→                value={title}
+   842→   842→                onChange={(e) => setTitle(e.target.value)}
+   843→   843→                className="border-slate-700 bg-slate-950/60 font-mono text-xs text-zinc-100 focus-visible:ring-emerald-500/30"
+   844→   844→              />
+   845→   845→            </div>
+   846→   846→            <div className="grid gap-2">
+   847→   847→              <Label htmlFor="creatorId" className="font-mono text-xs text-slate-400">
+   848→   848→                Creator ID
+   849→   849→              </Label>
+   850→   850→              <Input
+   851→   851→                id="creatorId"
+   852→   852→                value={creatorId}
+   853→   853→                onChange={(e) => setCreatorId(e.target.value)}
+   854→   854→                className="border-slate-700 bg-slate-950/60 font-mono text-xs text-cyan-300 focus-visible:ring-emerald-500/30"
+   855→   855→                spellCheck={false}
+   856→   856→              />
+   857→   857→            </div>
+   858→   858→            <Button
+   859→   859→              onClick={handleDispatch}
+   860→   860→              disabled={steps[1].status === 'running'}
+   861→   861→              className="bg-emerald-600 font-mono text-xs text-white hover:bg-emerald-500"
+   862→   862→            >
+   863→   863→              {steps[1].status === 'running' ? (
+   864→   864→                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+   865→   865→              ) : (
+   866→   866→                <Send className="h-3.5 w-3.5" />
+   867→   867→              )}
+   868→   868→              Dispatch PublishGame
+   869→   869→            </Button>
+   870→   870→            <StepResult step={steps[1]} />
+   871→   871→          </CardContent>
+   872→   872→        </Card>
+   873→   873→
+   874→   874→        {/* Step 2: Process Outbox */}
+   875→   875→        <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+   876→   876→          <CardHeader>
+   877→   877→            <StepHeader
+   878→   878→              n={2}
+   879→   879→              title="Process Outbox"
+   880→   880→              subtitle="POST /api/workers/outbox"
+   881→   881→              icon={Inbox}
+   882→   882→              status={steps[2].status}
+   883→   883→            />
+   884→   884→            <CardDescription className="text-xs">
+   885→   885→              The OutboxPublisher drains pending messages from the outbox table
+   886→   886→              and publishes them to the EventBus — guaranteeing at-least-once
+   887→   887→              delivery.
+   888→   888→            </CardDescription>
+   889→   889→          </CardHeader>
+   890→   890→          <CardContent className="space-y-3">
+   891→   891→            <Button
+   892→   892→              onClick={handleOutbox}
+   893→   893→              disabled={steps[2].status === 'running' || steps[1].status !== 'success'}
+   894→   894→              variant="outline"
+   895→   895→              className="border-cyan-500/40 bg-cyan-500/10 font-mono text-xs text-cyan-300 hover:bg-cyan-500/20 hover:text-cyan-200"
+   896→   896→            >
+   897→   897→              {steps[2].status === 'running' ? (
+   898→   898→                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+   899→   899→              ) : (
+   900→   900→                <Inbox className="h-3.5 w-3.5" />
+   901→   901→              )}
+   902→   902→              Process Outbox Batch
+   903→   903→            </Button>
+   904→   904→            {steps[1].status !== 'success' && (
+   905→   905→              <p className="font-mono text-[10px] text-amber-400/80">
+   906→   906→                Dispatch a command first to populate the outbox.
+   907→   907→              </p>
+   908→   908→            )}
+   909→   909→            <StepResult step={steps[2]} />
+   910→   910→          </CardContent>
+   911→   911→        </Card>
+   912→   912→
+   913→   913→        {/* Step 3: Run Projections */}
+   914→   914→        <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+   915→   915→          <CardHeader>
+   916→   916→            <StepHeader
+   917→   917→              n={3}
+   918→   918→              title="Run Projections"
+   919→   919→              subtitle="POST /api/workers/projections"
+   920→   920→              icon={GitBranch}
+   921→   921→              status={steps[3].status}
+   922→   922→            />
+   923→   923→            <CardDescription className="text-xs">
+   924→   924→              The ProjectionEngine replays published events through registered
+   925→   925→              projectors, materializing them into optimized read models.
+   926→   926→            </CardDescription>
+   927→   927→          </CardHeader>
+   928→   928→          <CardContent className="space-y-3">
+   929→   929→            <Button
+   930→   930→              onClick={handleProjections}
+   931→   931→              disabled={steps[3].status === 'running' || steps[2].status !== 'success'}
+   932→   932→              variant="outline"
+   933→   933→              className="border-cyan-500/40 bg-cyan-500/10 font-mono text-xs text-cyan-300 hover:bg-cyan-500/20 hover:text-cyan-200"
+   934→   934→            >
+   935→   935→              {steps[3].status === 'running' ? (
+   936→   936→                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+   937→   937→              ) : (
+   938→   938→                <GitBranch className="h-3.5 w-3.5" />
+   939→   939→              )}
+   940→   940→              Run Projection Batch
+   941→   941→            </Button>
+   942→   942→            {steps[2].status !== 'success' && (
+   943→   943→              <p className="font-mono text-[10px] text-amber-400/80">
+   944→   944→                Process the outbox first so events are available to projectors.
+   945→   945→              </p>
+   946→   946→            )}
+   947→   947→            <StepResult step={steps[3]} />
+   948→   948→          </CardContent>
+   949→   949→        </Card>
+   950→   950→
+   951→   951→        {/* Step 4: Query Read Model */}
+   952→   952→        <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+   953→   953→          <CardHeader>
+   954→   954→            <StepHeader
+   955→   955→              n={4}
+   956→   956→              title="Query Read Model"
+   957→   957→              subtitle="POST /api/queries"
+   958→   958→              icon={Search}
+   959→   959→              status={steps[4].status}
+   960→   960→            />
+   961→   961→            <CardDescription className="text-xs">
+   962→   962→              Executes a GetGame query through the QueryBus pipeline. Reads
+   963→   963→              exclusively from the materialized GameReadModel — never touches the
+   964→   964→              event stream.
+   965→   965→            </CardDescription>
+   966→   966→          </CardHeader>
+   967→   967→          <CardContent className="space-y-3">
+   968→   968→            <Button
+   969→   969→              onClick={handleQuery}
+   970→   970→              disabled={steps[4].status === 'running' || steps[3].status !== 'success'}
+   971→   971→              className="bg-emerald-600 font-mono text-xs text-white hover:bg-emerald-500"
+   972→   972→            >
+   973→   973→              {steps[4].status === 'running' ? (
+   974→   974→                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+   975→   975→              ) : (
+   976→   976→                <Search className="h-3.5 w-3.5" />
+   977→   977→              )}
+   978→   978→              Query Game Read Model
+   979→   979→            </Button>
+   980→   980→            {steps[3].status !== 'success' && (
+   981→   981→              <p className="font-mono text-[10px] text-amber-400/80">
+   982→   982→                Run projections first so the read model is up to date.
+   983→   983→              </p>
+   984→   984→            )}
+   985→   985→            <StepResult step={steps[4]} />
+   986→   986→          </CardContent>
+   987→   987→        </Card>
+   988→   988→      </div>
+   989→   989→    </section>
+   990→   990→  )
+   991→   991→}
+   992→   992→
+   993→   993→function StepHeader({
+   994→   994→  n,
+   995→   995→  title,
+   996→   996→  subtitle,
+   997→   997→  icon: Icon,
+   998→   998→  status,
+   999→   999→}: {
+  1000→  1000→  n: number
+  1001→  1001→  title: string
+  1002→  1002→  subtitle: string
+  1003→  1003→  icon: React.ComponentType<{ className?: string }>
+  1004→  1004→  status: StepStatus
+  1005→  1005→}) {
+  1006→  1006→  const ringColor =
+  1007→  1007→    status === 'success'
+  1008→  1008→      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+  1009→  1009→      : status === 'error'
+  1010→  1010→      ? 'border-rose-500/40 bg-rose-500/10 text-rose-300'
+  1011→  1011→      : status === 'running'
+  1012→  1012→      ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300'
+  1013→  1013→      : 'border-slate-700 bg-slate-900/60 text-slate-400'
+  1014→  1014→  return (
+  1015→  1015→    <div className="flex items-center justify-between gap-3">
+  1016→  1016→      <div className="flex items-center gap-3">
+  1017→  1017→        <div
+  1018→  1018→          className={`flex h-8 w-8 items-center justify-center rounded-md border font-mono text-sm font-bold ${ringColor}`}
+  1019→  1019→        >
+  1020→  1020→          {n}
+  1021→  1021→        </div>
+  1022→  1022→        <div>
+  1023→  1023→          <CardTitle className="font-mono text-base text-zinc-100">
+  1024→  1024→            {title}
+  1025→  1025→          </CardTitle>
+  1026→  1026→          <p className="mt-0.5 font-mono text-[10px] text-slate-500">{subtitle}</p>
+  1027→  1027→        </div>
+  1028→  1028→      </div>
+  1029→  1029→      <Icon className="h-4 w-4 text-slate-600" />
+  1030→  1030→    </div>
+  1031→  1031→  )
+  1032→  1032→}
+  1033→  1033→
+  1034→  1034→function StepResult({ step }: { step: StepState }) {
+  1035→  1035→  if (step.status === 'pending') return null
+  1036→  1036→  if (step.status === 'running') {
+  1037→  1037→    return (
+  1038→  1038→      <div className="flex items-center gap-2 rounded-md border border-cyan-500/30 bg-cyan-500/5 px-3 py-2 font-mono text-xs text-cyan-300">
+  1039→  1039→        <Loader2 className="h-3 w-3 animate-spin" />
+  1040→  1040→        Executing…
+  1041→  1041→      </div>
+  1042→  1042→    )
+  1043→  1043→  }
+  1044→  1044→  if (step.status === 'error') {
+  1045→  1045→    return (
+  1046→  1046→      <div className="rounded-md border border-rose-500/30 bg-rose-500/5 px-3 py-2">
+  1047→  1047→        <div className="flex items-center gap-2 font-mono text-xs text-rose-300">
+  1048→  1048→          <AlertCircle className="h-3 w-3" />
+  1049→  1049→          Error
+  1050→  1050→        </div>
+  1051→  1051→        <p className="mt-1 font-mono text-[11px] text-rose-300/80">{step.error}</p>
+  1052→  1052→      </div>
+  1053→  1053→    )
+  1054→  1054→  }
+  1055→  1055→  return (
+  1056→  1056→    <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2">
+  1057→  1057→      <div className="flex items-center justify-between">
+  1058→  1058→        <div className="flex items-center gap-2 font-mono text-xs text-emerald-300">
+  1059→  1059→          <CheckCircle2 className="h-3 w-3" />
+  1060→  1060→          Success
+  1061→  1061→        </div>
+  1062→  1062→        {step.timestamp && (
+  1063→  1063→          <span className="flex items-center gap-1 font-mono text-[10px] text-slate-500">
+  1064→  1064→            <Clock className="h-2.5 w-2.5" />
+  1065→  1065→            {new Date(step.timestamp).toLocaleTimeString()}
+  1066→  1066→          </span>
+  1067→  1067→        )}
+  1068→  1068→      </div>
+  1069→  1069→      <pre className="mt-2 max-h-48 overflow-auto rounded bg-slate-950/80 p-2 font-mono text-[10px] leading-tight text-slate-300">
+  1070→  1070→        {JSON.stringify(step.result, null, 2)}
+  1071→  1071→      </pre>
+  1072→  1072→    </div>
+  1073→  1073→  )
+  1074→  1074→}
+  1075→  1075→
+  1076→  1076→function FlowIndicator({ steps }: { steps: Record<number, StepState> }) {
+  1077→  1077→  const items = [
+  1078→  1078→    { n: 1, label: 'Command', icon: Send },
+  1079→  1079→    { n: 2, label: 'Outbox', icon: Inbox },
+  1080→  1080→    { n: 3, label: 'Projection', icon: GitBranch },
+  1081→  1081→    { n: 4, label: 'Query', icon: Search },
+  1082→  1082→  ]
+  1083→  1083→  return (
+  1084→  1084→    <div className="mt-8 grid grid-cols-1 gap-2 sm:grid-cols-4">
+  1085→  1085→      {items.map((item, idx) => {
+  1086→  1086→        const state = steps[item.n]
+  1087→  1087→        const Icon = item.icon
+  1088→  1088→        const color =
+  1089→  1089→          state.status === 'success'
+  1090→  1090→            ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300'
+  1091→  1091→            : state.status === 'error'
+  1092→  1092→            ? 'border-rose-500/50 bg-rose-500/10 text-rose-300'
+  1093→  1093→            : state.status === 'running'
+  1094→  1094→            ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300'
+  1095→  1095→            : 'border-slate-800 bg-slate-900/40 text-slate-500'
+  1096→  1096→        return (
+  1097→  1097→          <React.Fragment key={item.n}>
+  1098→  1098→            <div
+  1099→  1099→              className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${color}`}
+  1100→  1100→            >
+  1101→  1101→              <div className="flex items-center gap-2">
+  1102→  1102→                <Icon className="h-3.5 w-3.5" />
+  1103→  1103→                <span className="font-mono text-xs">
+  1104→  1104→                  <span className="opacity-60">{item.n}.</span> {item.label}
+  1105→  1105→                </span>
+  1106→  1106→              </div>
+  1107→  1107→              {state.status === 'success' && <CheckCircle2 className="h-3.5 w-3.5" />}
+  1108→  1108→              {state.status === 'error' && <AlertCircle className="h-3.5 w-3.5" />}
+  1109→  1109→              {state.status === 'running' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+  1110→  1110→              {state.status === 'pending' && <CircleDot className="h-3.5 w-3.5 opacity-40" />}
+  1111→  1111→            </div>
+  1112→  1112→            {idx < items.length - 1 && (
+  1113→  1113→              <div className="hidden items-center justify-center sm:flex">
+  1114→  1114→                <ArrowRight className="h-4 w-4 text-slate-700" />
+  1115→  1115→              </div>
+  1116→  1116→            )}
+  1117→  1117→          </React.Fragment>
+  1118→  1118→        )
+  1119→  1119→      })}
+  1120→  1120→    </div>
+  1121→  1121→  )
+  1122→  1122→}
+  1123→  1123→
+  1124→  1124→// ─── Registry Display ─────────────────────────────────────────────────────────
+  1125→  1125→
+  1126→  1126→function RegistryDisplay() {
+  1127→  1127→  const { toast } = useToast()
+  1128→  1128→  const [arch, setArch] = React.useState<ArchitectureResponse | null>(null)
+  1129→  1129→  const [loading, setLoading] = React.useState(true)
+  1130→  1130→  const [error, setError] = React.useState<string | null>(null)
+  1131→  1131→
+  1132→  1132→  const fetchArch = React.useCallback(async () => {
+  1133→  1133→    try {
+  1134→  1134→      const res = await fetch('/api/architecture', { cache: 'no-store' })
+  1135→  1135→      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  1136→  1136→      const data = (await res.json()) as ArchitectureResponse
+  1137→  1137→      setArch(data)
+  1138→  1138→      setError(null)
+  1139→  1139→    } catch (e) {
+  1140→  1140→      const msg = e instanceof Error ? e.message : 'Failed to fetch architecture'
+  1141→  1141→      setError(msg)
+  1142→  1142→    } finally {
+  1143→  1143→      setLoading(false)
+  1144→  1144→    }
+  1145→  1145→  }, [])
+  1146→  1146→
+  1147→  1147→  React.useEffect(() => {
+  1148→  1148→    void fetchArch()
+  1149→  1149→  }, [fetchArch])
+  1150→  1150→
+  1151→  1151→  const handleRefresh = () => {
+  1152→  1152→    setLoading(true)
+  1153→  1153→    void fetchArch()
+  1154→  1154→    toast({ title: 'Registry refreshed' })
+  1155→  1155→  }
+  1156→  1156→
+  1157→  1157→  return (
+  1158→  1158→    <section id="registry" className="scroll-mt-8">
+  1159→  1159→      <SectionHeading
+  1160→  1160→        index="04"
+  1161→  1161→        title="Registry Display"
+  1162→  1162→        description="Live introspection of the DI container — registered event types, commands, queries, and bindings."
+  1163→  1163→        icon={Plug}
+  1164→  1164→        action={
+  1165→  1165→          <Button
+  1166→  1166→            variant="outline"
+  1167→  1167→            size="sm"
+  1168→  1168→            onClick={handleRefresh}
+  1169→  1169→            disabled={loading}
+  1170→  1170→            className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-300 hover:bg-slate-800 hover:text-zinc-100"
+  1171→  1171→          >
+  1172→  1172→            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+  1173→  1173→            Refresh
+  1174→  1174→          </Button>
+  1175→  1175→        }
+  1176→  1176→      />
+  1177→  1177→      {error ? (
+  1178→  1178→        <div className="mt-6 flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+  1179→  1179→          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+  1180→  1180→          <span className="font-mono">{error}</span>
+  1181→  1181→        </div>
+  1182→  1182→      ) : (
+  1183→  1183→        <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+  1184→  1184→          <RegistryCard
+  1185→  1185→            title="Event Types"
+  1186→  1186→            count={arch?.eventTypes.length ?? 0}
+  1187→  1187→            items={arch?.eventTypes}
+  1188→  1188→            loading={loading}
+  1189→  1189→            icon={Radio}
+  1190→  1190→            accent="emerald"
+  1191→  1191→          />
+  1192→  1192→          <RegistryCard
+  1193→  1193→            title="Command Types"
+  1194→  1194→            count={arch?.commandTypes.length ?? 0}
+  1195→  1195→            items={arch?.commandTypes}
+  1196→  1196→            loading={loading}
+  1197→  1197→            icon={Send}
+  1198→  1198→            accent="cyan"
+  1199→  1199→          />
+  1200→  1200→          <RegistryCard
+  1201→  1201→            title="Query Types"
+  1202→  1202→            count={arch?.queryTypes.length ?? 0}
+  1203→  1203→            items={arch?.queryTypes}
+  1204→  1204→            loading={loading}
+  1205→  1205→            icon={Search}
+  1206→  1206→            accent="cyan"
+  1207→  1207→          />
+  1208→  1208→          <BindingsCard bindings={arch?.bindings} loading={loading} />
+  1209→  1209→        </div>
+  1210→  1210→      )}
+  1211→  1211→    </section>
+  1212→  1212→  )
+  1213→  1213→}
+  1214→  1214→
+  1215→  1215→function RegistryCard({
+  1216→  1216→  title,
+  1217→  1217→  count,
+  1218→  1218→  items,
+  1219→  1219→  loading,
+  1220→  1220→  icon: Icon,
+  1221→  1221→  accent,
+  1222→  1222→}: {
+  1223→  1223→  title: string
+  1224→  1224→  count: number
+  1225→  1225→  items?: string[]
+  1226→  1226→  loading: boolean
+  1227→  1227→  icon: React.ComponentType<{ className?: string }>
+  1228→  1228→  accent: 'emerald' | 'cyan'
+  1229→  1229→}) {
+  1230→  1230→  const a = accentClasses(accent)
+  1231→  1231→  return (
+  1232→  1232→    <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+  1233→  1233→      <CardHeader className="gap-2">
+  1234→  1234→        <div className="flex items-center justify-between">
+  1235→  1235→          <div className="flex items-center gap-2">
+  1236→  1236→            <div className={`flex h-7 w-7 items-center justify-center rounded-md border ${a.bg} ${a.border}`}>
+  1237→  1237→              <Icon className={`h-3.5 w-3.5 ${a.text}`} />
+  1238→  1238→            </div>
+  1239→  1239→            <CardTitle className="font-mono text-sm text-zinc-100">{title}</CardTitle>
+  1240→  1240→          </div>
+  1241→  1241→          <Badge variant="outline" className="border-slate-700 bg-slate-950/60 font-mono text-xs text-slate-300">
+  1242→  1242→            {loading ? '…' : count}
+  1243→  1243→          </Badge>
+  1244→  1244→        </div>
+  1245→  1245→      </CardHeader>
+  1246→  1246→      <CardContent>
+  1247→  1247→        <ScrollArea className="h-48 rounded-md">
+  1248→  1248→          {loading ? (
+  1249→  1249→            <div className="flex h-full items-center justify-center">
+  1250→  1250→              <Loader2 className="h-4 w-4 animate-spin text-slate-600" />
+  1251→  1251→            </div>
+  1252→  1252→          ) : items && items.length > 0 ? (
+  1253→  1253→            <div className="flex flex-wrap gap-1.5 pr-2">
+  1254→  1254→              {items.map((item) => (
+  1255→  1255→                <Badge
+  1256→  1256→                  key={item}
+  1257→  1257→                  variant="outline"
+  1258→  1258→                  className={`border-slate-700 bg-slate-950/60 px-2 py-0.5 font-mono text-[10px] ${a.text}`}
+  1259→  1259→                >
+  1260→  1260→                  {item}
+  1261→  1261→                </Badge>
+  1262→  1262→              ))}
+  1263→  1263→            </div>
+  1264→  1264→          ) : (
+  1265→  1265→            <p className="py-8 text-center font-mono text-xs text-slate-500">
+  1266→  1266→              No items registered.
+  1267→  1267→            </p>
+  1268→  1268→          )}
+  1269→  1269→        </ScrollArea>
+  1270→  1270→      </CardContent>
+  1271→  1271→    </Card>
+  1272→  1272→  )
+  1273→  1273→}
+  1274→  1274→
+  1275→  1275→function BindingsCard({
+  1276→  1276→  bindings,
+  1277→  1277→  loading,
+  1278→  1278→}: {
+  1279→  1279→  bindings?: ArchitectureBinding[]
+  1280→  1280→  loading: boolean
+  1281→  1281→}) {
+  1282→  1282→  const singletonCount = bindings?.filter((b) => b.lifetime === 'singleton').length ?? 0
+  1283→  1283→  const transientCount = bindings?.filter((b) => b.lifetime === 'transient').length ?? 0
+  1284→  1284→  return (
+  1285→  1285→    <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black-20 ring-1 ring-inset ring-slate-800/60">
+  1286→  1286→      <CardHeader className="gap-2">
+  1287→  1287→        <div className="flex items-center justify-between">
+  1288→  1288→          <div className="flex items-center gap-2">
+  1289→  1289→            <div className="flex h-7 w-7 items-center justify-center rounded-md border border-emerald-500/30 bg-emerald-500/10">
+  1290→  1290→              <Boxes className="h-3.5 w-3.5 text-emerald-400" />
+  1291→  1291→            </div>
+  1292→  1292→            <CardTitle className="font-mono text-sm text-zinc-100">DI Bindings</CardTitle>
+  1293→  1293→          </div>
+  1294→  1294→          <Badge variant="outline" className="border-slate-700 bg-slate-950/60 font-mono text-xs text-slate-300">
+  1295→  1295→            {loading ? '…' : bindings?.length ?? 0}
+  1296→  1296→          </Badge>
+  1297→  1297→        </div>
+  1298→  1298→      </CardHeader>
+  1299→  1299→      <CardContent>
+  1300→  1300→        <div className="mb-3 grid grid-cols-2 gap-2">
+  1301→  1301→          <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2 font-mono text-xs">
+  1302→  1302→            <div className="text-slate-500">Singleton</div>
+  1303→  1303→            <div className="text-emerald-300">{singletonCount}</div>
+  1304→  1304→          </div>
+  1305→  1305→          <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2 font-mono text-xs">
+  1306→  1306→            <div className="text-slate-500">Transient</div>
+  1307→  1307→            <div className="text-cyan-300">{transientCount}</div>
+  1308→  1308→          </div>
+  1309→  1309→        </div>
+  1310→  1310→        <ScrollArea className="h-36 rounded-md">
+  1311→  1311→          {loading ? (
+  1312→  1312→            <div className="flex h-full items-center justify-center">
+  1313→  1313→              <Loader2 className="h-4 w-4 animate-spin text-slate-600" />
+  1314→  1314→            </div>
+  1315→  1315→          ) : bindings && bindings.length > 0 ? (
+  1316→  1316→            <div className="space-y-1 pr-2">
+  1317→  1317→              {bindings.map((b, i) => (
+  1318→  1318→                <div
+  1319→  1319→                  key={`${b.token}-${i}`}
+  1320→  1320→                  className="flex items-center justify-between rounded border border-slate-800 bg-slate-950/40 px-2 py-1"
+  1321→  1321→                >
+  1322→  1322→                  <span className="truncate font-mono text-[10px] text-slate-300">
+  1323→  1323→                    {b.token}
+  1324→  1324→                  </span>
+  1325→  1325→                  <Badge
+  1326→  1326→                    variant="outline"
+  1327→  1327→                    className={`ml-2 shrink-0 border-transparent px-1.5 py-0 font-mono text-[9px] ${
+  1328→  1328→                      b.lifetime === 'singleton'
+  1329→  1329→                        ? 'bg-emerald-500/15 text-emerald-300'
+  1330→  1330→                        : 'bg-cyan-500/15 text-cyan-300'
+  1331→  1331→                    }`}
+  1332→  1332→                  >
+  1333→  1333→                    {b.lifetime}
+  1334→  1334→                  </Badge>
+  1335→  1335→                </div>
+  1336→  1336→              ))}
+  1337→  1337→            </div>
+  1338→  1338→          ) : (
+  1339→  1339→            <p className="py-8 text-center font-mono text-xs text-slate-500">
+  1340→  1340→              No bindings registered.
+  1341→  1341→            </p>
+  1342→  1342→          )}
+  1343→  1343→        </ScrollArea>
+  1344→  1344→      </CardContent>
+  1345→  1345→    </Card>
+  1346→  1346→  )
+  1347→  1347→}
+  1348→  1348→
+  1349→  1349→// ─── Pipeline Visualization ───────────────────────────────────────────────────
+  1350→  1350→
+  1351→  1351→function PipelineVisualization() {
+  1352→  1352→  return (
+  1353→  1353→    <section id="pipelines" className="scroll-mt-8">
+  1354→  1354→      <SectionHeading
+  1355→  1355→        index="05"
+  1356→  1356→        title="Pipeline Visualization"
+  1357→  1357→        description="Every command and query flows through a chain of cross-cutting middleware before reaching its handler."
+  1358→  1358→        icon={Workflow}
+  1359→  1359→      />
+  1360→  1360→      <div className="mt-8 grid gap-6 lg:grid-cols-2">
+  1361→  1361→        <PipelineCard
+  1362→  1362→          title="Command Bus Pipeline"
+  1363→  1363→          subtitle="7 middleware stages"
+  1364→  1364→          stages={COMMAND_PIPELINE}
+  1365→  1365→          accent="emerald"
+  1366→  1366→          icon={Send}
+  1367→  1367→        />
+  1368→  1368→        <PipelineCard
+  1369→  1369→          title="Query Bus Pipeline"
+  1370→  1370→          subtitle="3 middleware stages"
+  1371→  1371→          stages={QUERY_PIPELINE}
+  1372→  1372→          accent="cyan"
+  1373→  1373→          icon={Search}
+  1374→  1374→        />
+  1375→  1375→      </div>
+  1376→  1376→    </section>
+  1377→  1377→  )
+  1378→  1378→}
+  1379→  1379→
+  1380→  1380→function PipelineCard({
+  1381→  1381→  title,
+  1382→  1382→  subtitle,
+  1383→  1383→  stages,
+  1384→  1384→  accent,
+  1385→  1385→  icon: Icon,
+  1386→  1386→}: {
+  1387→  1387→  title: string
+  1388→  1388→  subtitle: string
+  1389→  1389→  stages: string[]
+  1390→  1390→  accent: 'emerald' | 'cyan'
+  1391→  1391→  icon: React.ComponentType<{ className?: string }>
+  1392→  1392→}) {
+  1393→  1393→  const a = accentClasses(accent)
+  1394→  1394→  return (
+  1395→  1395→    <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+  1396→  1396→      <CardHeader className="gap-2">
+  1397→  1397→        <div className="flex items-center justify-between">
+  1398→  1398→          <div className="flex items-center gap-2">
+  1399→  1399→            <div className={`flex h-7 w-7 items-center justify-center rounded-md border ${a.bg} ${a.border}`}>
+  1400→  1400→              <Icon className={`h-3.5 w-3.5 ${a.text}`} />
+  1401→  1401→            </div>
+  1402→  1402→            <CardTitle className="font-mono text-sm text-zinc-100">{title}</CardTitle>
+  1403→  1403→          </div>
+  1404→  1404→          <Badge variant="outline" className="border-slate-700 bg-slate-950/60 font-mono text-[10px] text-slate-400">
+  1405→  1405→            {subtitle}
+  1406→  1406→          </Badge>
+  1407→  1407→        </div>
+  1408→  1408→      </CardHeader>
+  1409→  1409→      <CardContent>
+  1410→  1410→        <div className="flex flex-col gap-2">
+  1411→  1411→          {stages.map((stage, idx) => {
+  1412→  1412→            const isHandler = stage === 'Handler'
+  1413→  1413→            return (
+  1414→  1414→              <React.Fragment key={stage}>
+  1415→  1415→                <div
+  1416→  1416→                  className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${
+  1417→  1417→                    isHandler
+  1418→  1418→                      ? 'border-emerald-500/40 bg-emerald-500/10'
+  1419→  1419→                      : `${a.border} ${a.bg}`
+  1420→  1420→                  }`}
+  1421→  1421→                >
+  1422→  1422→                  <span
+  1423→  1423→                    className={`flex h-5 w-5 items-center justify-center rounded font-mono text-[10px] font-bold ${
+  1424→  1424→                      isHandler
+  1425→  1425→                        ? 'bg-emerald-500/20 text-emerald-300'
+  1426→  1426→                        : 'bg-slate-950/60 text-slate-400'
+  1427→  1427→                    }`}
+  1428→  1428→                  >
+  1429→  1429→                    {idx + 1}
+  1430→  1430→                  </span>
+  1431→  1431→                  <span
+  1432→  1432→                    className={`font-mono text-xs ${
+  1433→  1433→                      isHandler ? 'font-semibold text-emerald-300' : a.text
+  1434→  1434→                    }`}
+  1435→  1435→                  >
+  1436→  1436→                    {stage}
+  1437→  1437→                  </span>
+  1438→  1438→                  {isHandler && (
+  1439→  1439→                    <Badge
+  1440→  1440→                      variant="outline"
+  1441→  1441→                      className="ml-auto border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0 font-mono text-[9px] text-emerald-300"
+  1442→  1442→                    >
+  1443→  1443→                      terminal
+  1444→  1444→                    </Badge>
+  1445→  1445→                  )}
+  1446→  1446→                </div>
+  1447→  1447→                {idx < stages.length - 1 && (
+  1448→  1448→                  <div className="flex justify-center">
+  1449→  1449→                    <ArrowDown className={`h-3 w-3 ${isHandler ? 'text-emerald-500/40' : 'text-slate-700'}`} />
+  1450→  1450→                  </div>
+  1451→  1451→                )}
+  1452→  1452→              </React.Fragment>
+  1453→  1453→            )
+  1454→  1454→          })}
+  1455→  1455→        </div>
+  1456→  1456→      </CardContent>
+  1457→  1457→    </Card>
+  1458→  1458→  )
+  1459→  1459→}
+  1460→  1460→
+  1461→  1461→// ─── Section Heading ──────────────────────────────────────────────────────────
+  1462→  1462→
+  1463→  1463→function SectionHeading({
+  1464→  1464→  index,
+  1465→  1465→  title,
+  1466→  1466→  description,
+  1467→  1467→  icon: Icon,
+  1468→  1468→  action,
+  1469→  1469→}: {
+  1470→  1470→  index: string
+  1471→  1471→  title: string
+  1472→  1472→  description: string
+  1473→  1473→  icon: React.ComponentType<{ className?: string }>
+  1474→  1474→  action?: React.ReactNode
+  1475→  1475→}) {
+  1476→  1476→  return (
+  1477→  1477→    <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+  1478→  1478→      <div className="flex flex-col gap-3">
+  1479→  1479→        <div className="flex items-center gap-3">
+  1480→  1480→          <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 ring-1 ring-inset ring-emerald-500/20">
+  1481→  1481→            <Icon className="h-4 w-4 text-emerald-400" />
+  1482→  1482→          </div>
+  1483→  1483→          <div className="flex items-baseline gap-2">
+  1484→  1484→            <span className="font-mono text-xs text-slate-600">{index}</span>
+  1485→  1485→            <h2 className="font-mono text-2xl font-semibold tracking-tight text-zinc-50">
+  1486→  1486→              {title}
+  1487→  1487→            </h2>
+  1488→  1488→          </div>
+  1489→  1489→        </div>
+  1490→  1490→        <p className="max-w-2xl text-sm text-slate-400">{description}</p>
+  1491→  1491→      </div>
+  1492→  1492→      {action && <div className="shrink-0">{action}</div>}
+  1493→  1493→    </div>
+  1494→  1494→  )
+  1495→  1495→}
+  1496→  1496→
+  1497→  1497→// ─── Footer ───────────────────────────────────────────────────────────────────
+  1498→  1498→
+  1499→  1499→function Footer() {
+  1500→  1500→  return (
+  1501→  1501→    <footer className="mt-auto border-t border-slate-800/80 bg-slate-950/80 backdrop-blur-sm">
+  1502→  1502→      <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
+  1503→  1503→        <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+  1504→  1504→          <div className="space-y-2">
+  1505→  1505→            <div className="flex items-center gap-2 font-mono text-sm text-zinc-100">
+  1506→  1506→              <span className="text-emerald-400">Play</span>
+  1507→  1507→              <span>Liquid</span>
+  1508→  1508→              <span className="text-slate-600">·</span>
+  1509→  1509→              <span className="text-slate-400">Architecture Foundation</span>
+  1510→  1510→            </div>
+  1511→  1511→            <p className="font-mono text-xs text-slate-500">
+  1512→  1512→              Milestone 1 — Production-grade event-driven platform.
+  1513→  1513→            </p>
+  1514→  1514→          </div>
+  1515→  1515→          <div className="flex flex-col gap-2">
+  1516→  1516→            <p className="font-mono text-[10px] uppercase tracking-widest text-slate-600">
+  1517→  1517→              Health Endpoints
+  1518→  1518→            </p>
+  1519→  1519→            <div className="flex flex-wrap gap-2">
+  1520→  1520→              <FooterLink href="/api/health" label="/api/health" icon={Activity} />
+  1521→  1521→              <FooterLink href="/api/ready" label="/api/ready" icon={CheckCircle2} />
+  1522→  1522→              <FooterLink href="/api/live" label="/api/live" icon={Zap} />
+  1523→  1523→            </div>
+  1524→  1524→          </div>
+  1525→  1525→        </div>
+  1526→  1526→        <Separator className="bg-slate-800" />
+  1527→  1527→        <div className="flex flex-col items-center justify-between gap-2 font-mono text-[10px] text-slate-600 sm:flex-row">
+  1528→  1528→          <span>
+  1529→  1529→            Built with DDD · CQRS · Event Sourcing · Outbox Pattern
+  1530→  1530→          </span>
+  1531→  1531→          <span className="flex items-center gap-1.5">
+  1532→  1532→            <Cloud className="h-3 w-3" />
+  1533→  1533→            Next.js · TypeScript · Prisma · shadcn/ui
+  1534→  1534→          </span>
+  1535→  1535→        </div>
+  1536→  1536→      </div>
+  1537→  1537→    </footer>
+  1538→  1538→  )
+  1539→  1539→}
+  1540→  1540→
+  1541→  1541→function FooterLink({
+  1542→  1542→  href,
+  1543→  1543→  label,
+  1544→  1544→  icon: Icon,
+  1545→  1545→}: {
+  1546→  1546→  href: string
+  1547→  1547→  label: string
+  1548→  1548→  icon: React.ComponentType<{ className?: string }>
+  1549→  1549→}) {
+  1550→  1550→  return (
+  1551→  1551→    <a
+  1552→  1552→      href={href}
+  1553→  1553→      className="inline-flex items-center gap-1.5 rounded-md border border-slate-800 bg-slate-900/60 px-2.5 py-1 font-mono text-[11px] text-slate-400 transition-colors hover:border-emerald-500/40 hover:bg-emerald-500/10 hover:text-emerald-300"
+  1554→  1554→    >
+  1555→  1555→      <Icon className="h-3 w-3" />
+  1556→  1556→      {label}
+  1557→  1557→    </a>
+  1558→  1558→  )
+  1559→  1559→}
+  1560→  1560→

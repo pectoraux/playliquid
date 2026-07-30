@@ -139,3 +139,27 @@ export function getConfig(): AppConfig {
 export function resetConfig(): void {
   cachedConfig = null;
 }
+
+/**
+ * Read a raw environment variable by name.
+ *
+ * This is the ONLY sanctioned way for code outside `src/shared/config/` to
+ * read arbitrary environment variables (e.g. secrets managed by an external
+ * secret manager) without violating the architecture boundary rule.
+ * Returns `undefined` if the variable is unset.
+ */
+export function getEnvVar(name: string): string | undefined {
+  return process.env[name];
+}
+
+/**
+ * Read a raw environment variable by name, throwing if unset.
+ * Use for required secrets that must exist at runtime.
+ */
+export function requireEnvVar(name: string): string {
+  const value = process.env[name];
+  if (value === undefined || value === '') {
+    throw new Error(`Required environment variable '${name}' is not set`);
+  }
+  return value;
+}

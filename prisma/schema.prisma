@@ -168,6 +168,28 @@ model StatisticsReadModel {
   updatedAt DateTime @updatedAt
 }
 
+// ─── Dead Letter Queue ────────────────────────────────────────────────────
+
+model DeadLetterMessage {
+  id                String   @id
+  originalQueue     String
+  originalMessageId String
+  payload           String
+  headers           String
+  errorHistory      String
+  attempts          Int
+  firstFailedAt     BigInt
+  lastFailedAt      BigInt
+  expiresAt         BigInt
+  status            String   @default("pending")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([originalQueue, status])
+  @@index([status, expiresAt])
+  @@index([lastFailedAt])
+}
+
 // ─── Health Check ─────────────────────────────────────────────────────────
 
 model HealthCheck {
@@ -177,3 +199,86 @@ model HealthCheck {
   checkedAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// ─── Scheduled Jobs (Scheduler persistence) ───────────────────────────────
+
+model ScheduledJob {
+  id          String   @id @default(cuid())
+  jobId       String   @unique
+  name        String
+  schedule    String
+  priority    Int      @default(0)
+  enabled     Boolean  @default(true)
+  lastRunAt   BigInt?
+  nextRunAt   BigInt?
+  runCount    Int      @default(0)
+  errorCount  Int      @default(0)
+  lastError   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([nextRunAt, enabled])
+  @@index([name])
+}
+
+// ─── Webhook Registry ─────────────────────────────────────────────────────
+
+model WebhookRegistration {
+  id        String   @id @default(cuid())
+  url       String
+  events    String
+  secret    String
+  isActive  Boolean  @default(true)
+  metadata  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+model WebhookDelivery {
+  id             String   @id @default(cuid())
+  webhookId      String
+  payload        String
+  attempts       Int      @default(0)
+  status         String   @default("pending")
+  responseStatus Int?
+  responseBody   String?
+  deliveredAt    DateTime?
+  nextRetryAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([webhookId, status])
+  @@index([status, nextRetryAt])
+}
+
+// ─── Backup Records ───────────────────────────────────────────────────────
+
+model BackupRecord {
+  id           String   @id @default(cuid())
+  backupId     String   @unique
+  type         String
+  status       String
+  size         BigInt
+  location     String
+  checksum     String
+  startedAt    DateTime
+  completedAt  DateTime
+  error        String?
+  createdAt    DateTime @default(now())
+
+  @@index([type, createdAt])
+}
+
+// ─── Feature Flags ────────────────────────────────────────────────────────
+
+model FeatureFlagRecord {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  type      String
+  enabled   Boolean  @default(false)
+  config    String
+  updatedAt DateTime @updatedAt
+}
+

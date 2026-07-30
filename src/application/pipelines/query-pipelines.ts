@@ -58,17 +58,28 @@ export class QueryMetricsMiddleware implements QueryMiddleware {
 export class QueryCacheMiddleware implements QueryMiddleware {
   readonly name = 'query-cache';
 
-  constructor(private readonly cache: Cache, private readonly ttlSeconds: number) {}
+  constructor(private readonly cache: Cache | null, private readonly ttlSeconds: number) {}
 
   async handle<T>(query: Query, next: (query: Query) => Promise<Result<T>>): Promise<Result<T>> {
+    if (!this.cache || typeof this.cache.get !== 'function') {
+      return next(query);
+    }
     const cacheKey = `query:${query.queryType}:${JSON.stringify((query as { payload?: unknown }).payload ?? query)}`;
-    const cached = this.cache.get<Result<T>>(cacheKey);
-    if (cached) {
-      return cached;
+    try {
+      const cached = this.cache.get<Result<T>>(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    } catch {
+      // Cache read failed — proceed without cache
     }
     const result = await next(query);
     if (result.ok) {
-      this.cache.set(cacheKey, result, this.ttlSeconds);
+      try {
+        this.cache.set(cacheKey, result, this.ttlSeconds);
+      } catch {
+        // Cache write failed — ignore
+      }
     }
     return result;
   }
