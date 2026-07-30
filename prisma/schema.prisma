@@ -1,0 +1,179 @@
+// PlayLiquid — Production Architecture Schema
+//
+// This schema supports the event-sourced, CQRS architecture:
+//   - EventRecord / Snapshot: append-only event store with optimistic concurrency
+//   - OutboxMessage: transactional outbox for reliable event publishing
+//   - ProjectionCheckpoint: idempotent projection replay tracking
+//   - IdempotencyRecord: command deduplication
+//   - Read models: materialized projections for the query side
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Event Store ──────────────────────────────────────────────────────────
+
+model EventRecord {
+  id              Int      @id @default(autoincrement())
+  eventId         String   @unique
+  streamId        String
+  streamVersion   Int
+  eventType       String
+  aggregateId     String
+  aggregateType   String
+  aggregateVersion Int
+  payload         String
+  metadata        String
+  occurredAt      String
+  correlationId   String?
+  causationId     String?
+  createdAt       DateTime @default(now())
+
+  @@unique([streamId, streamVersion])
+  @@index([aggregateId])
+  @@index([aggregateType])
+  @@index([eventType])
+  @@index([occurredAt])
+}
+
+model Snapshot {
+  id            String   @id @default(cuid())
+  streamId      String
+  version       Int
+  aggregateType String
+  state         String
+  createdAt     DateTime @default(now())
+
+  @@unique([streamId, version])
+  @@index([aggregateType])
+}
+
+// ─── Outbox ───────────────────────────────────────────────────────────────
+
+model OutboxMessage {
+  id          String    @id @default(cuid())
+  eventId     String    @unique
+  eventType   String
+  payload     String
+  headers     String
+  status      String    @default("pending")
+  retryCount  Int       @default(0)
+  maxRetries  Int       @default(5)
+  error       String?
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([eventType])
+}
+
+// ─── Projection Checkpoints ───────────────────────────────────────────────
+
+model ProjectionCheckpoint {
+  id             String   @id @default(cuid())
+  projectionName String   @unique
+  lastEventId    String?
+  lastEventRowId Int      @default(0)
+  updatedAt      DateTime @updatedAt
+}
+
+// ─── Idempotency ──────────────────────────────────────────────────────────
+
+model IdempotencyRecord {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  result    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+// ─── Read Models (materialized projections) ───────────────────────────────
+
+model UserReadModel {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  email     String
+  username  String
+  country   String
+  status    String   @default("active")
+  createdAt String
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+  @@index([username])
+}
+
+model GameReadModel {
+  id          String   @id @default(cuid())
+  gameId      String   @unique
+  title       String
+  creatorId   String
+  status      String   @default("draft")
+  publishedAt String?
+  createdAt   String
+  updatedAt   DateTime @updatedAt
+
+  @@index([creatorId])
+  @@index([status])
+}
+
+model SessionReadModel {
+  id              String   @id @default(cuid())
+  sessionId       String   @unique
+  gameId          String
+  playerId        String
+  status          String   @default("active")
+  durationMinutes Int      @default(0)
+  startedAt       String
+  endedAt         String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([gameId, playerId])
+  @@index([status])
+}
+
+model WalletReadModel {
+  id        String   @id @default(cuid())
+  playerId  String   @unique
+  balance   Int      @default(0)
+  currency  String   @default("USD")
+  updatedAt DateTime @updatedAt
+}
+
+model LeaderboardEntry {
+  id        String   @id @default(cuid())
+  gameId    String
+  playerId  String
+  score     Int
+  rank      Int?
+  updatedAt DateTime @updatedAt
+
+  @@unique([gameId, playerId])
+  @@index([gameId, score])
+}
+
+model StatisticsReadModel {
+  id        String   @id
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Health Check ─────────────────────────────────────────────────────────
+
+model HealthCheck {
+  id        String   @id @default(cuid())
+  component String   @unique
+  status    String   @default("unknown")
+  checkedAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
