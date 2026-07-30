@@ -98,17 +98,23 @@ model IdempotencyRecord {
 // ─── Read Models (materialized projections) ───────────────────────────────
 
 model UserReadModel {
-  id        String   @id @default(cuid())
-  userId    String   @unique
-  email     String
-  username  String
-  country   String
-  status    String   @default("active")
-  createdAt String
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  email       String
+  username    String
+  displayName String   @default("")
+  country     String   @default("")
+  timezone    String   @default("UTC")
+  locale      String   @default("en")
+  status      String   @default("waitlist")
+  emailVerified Boolean @default(false)
+  mfaEnabled  Boolean  @default(false)
+  createdAt   String
+  updatedAt   DateTime @updatedAt
 
   @@index([email])
   @@index([username])
+  @@index([status])
 }
 
 model GameReadModel {
@@ -280,5 +286,138 @@ model FeatureFlagRecord {
   enabled   Boolean  @default(false)
   config    String
   updatedAt DateTime @updatedAt
+}
+
+// ─── M3: Identity — RBAC, API Keys, Audit Log, Devices, Waitlist ───────────
+
+model Role {
+  id          String   @id
+  name        String   @unique
+  description String   @default("")
+  permissions String   @default("[]")
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([name])
+}
+
+model Permission {
+  id          String   @id
+  resource    String
+  action      String
+  description String   @default("")
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@unique([resource, action])
+  @@index([resource])
+}
+
+model ApiKey {
+  id          String    @id
+  userId      String
+  name        String
+  keyHash     String    @unique
+  keyPrefix   String
+  scopes      String    @default("[]")
+  expiresAt   DateTime?
+  lastUsedAt  DateTime?
+  lastUsedIp  String?
+  createdAt   DateTime  @default(now())
+  revokedAt   DateTime?
+  active      Boolean   @default(true)
+
+  @@index([userId])
+  @@index([keyHash])
+  @@index([active])
+}
+
+model AuditLog {
+  id            String   @id
+  action        String
+  actorId       String
+  actorType     String
+  targetType    String
+  targetId      String
+  timestamp     String
+  ipAddress     String?
+  userAgent     String?
+  metadata      String   @default("{}")
+  correlationId String?
+  createdAt     DateTime @default(now())
+
+  @@index([actorId, timestamp])
+  @@index([targetType, targetId])
+  @@index([action])
+  @@index([timestamp])
+  @@index([correlationId])
+}
+
+model Device {
+  id            String   @id
+  userId        String
+  name          String
+  browser       String   @default("")
+  os            String   @default("")
+  ipAddress     String
+  location      String?
+  fingerprint   String
+  riskScore     Int      @default(0)
+  trusted       Boolean  @default(false)
+  firstSeenAt   String
+  lastSeenAt    String
+  revokedAt     String?
+
+  @@unique([userId, fingerprint])
+  @@index([userId])
+  @@index([fingerprint])
+}
+
+model WaitlistEntry {
+  id                String   @id
+  email             String   @unique
+  username          String
+  status            String   @default("pending")
+  verificationToken String?
+  verifiedAt        String?
+  approvalNotes     String?
+  rejectionReason   String?
+  invitedById       String?
+  createdAt         String
+  updatedAt         String
+
+  @@index([status])
+  @@index([username])
+}
+
+model OrganizationReadModel {
+  id          String   @id @default(cuid())
+  orgId       String   @unique
+  name        String
+  slug        String   @unique
+  type        String
+  createdById String
+  active      Boolean  @default(true)
+  createdAt   String
+  updatedAt   DateTime @updatedAt
+
+  @@index([slug])
+  @@index([createdById])
+}
+
+model OrganizationMemberReadModel {
+  id        String   @id @default(cuid())
+  orgId     String
+  userId    String
+  roleId    String
+  status    String   @default("active")
+  joinedAt  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orgId, userId])
+  @@index([orgId])
+  @@index([userId])
 }
 

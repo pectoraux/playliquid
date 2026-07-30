@@ -98,6 +98,68 @@ import { AllowAnyonePolicy, registerPolicy } from '@/application/authorization/p
 
 // Domain events
 import { registerAllEvents } from '@/domain/events';
+import { registerIdentityEvents } from '@/domain/identity/events';
+
+// M3: Identity infrastructure
+import { Argon2PasswordHasher as ScryptPasswordHasher } from '@/infrastructure/identity/argon2-password-hasher';
+import { UserRepositoryImpl } from '@/infrastructure/identity/user-repository-impl';
+import { OrganizationRepositoryImpl } from '@/infrastructure/identity/organization-repository-impl';
+import { PrismaRoleRepository } from '@/infrastructure/identity/prisma-role-repository';
+import { PrismaPermissionRepository } from '@/infrastructure/identity/prisma-permission-repository';
+import { PrismaApiKeyRepository } from '@/infrastructure/identity/prisma-api-key-repository';
+import { PrismaAuditLogRepository } from '@/infrastructure/identity/prisma-audit-log-repository';
+import { PrismaDeviceRepository } from '@/infrastructure/identity/prisma-device-repository';
+import { PrismaWaitlistRepository } from '@/infrastructure/identity/prisma-waitlist-repository';
+import { UserProfileProjector, OrganizationProjector, AuditLogProjector, ApiKeyProjector } from '@/infrastructure/identity/identity-projectors';
+import { PrismaUserReadModelStore, PrismaOrganizationReadModelStore } from '@/infrastructure/identity/read-model-stores';
+import { InMemoryTokenStore } from '@/infrastructure/identity/token-store';
+import { ConsoleEmailService } from '@/infrastructure/identity/email-service';
+import { generateApiKey } from '@/infrastructure/identity/api-key-generator';
+import { RbacEngine, AbacEngine, PolicyEngine } from '@/domain/identity/policies/authorization-engine';
+import { RiskEngine } from '@/domain/identity/services/risk-engine';
+
+// M3: Identity commands and queries
+import { IDENTITY_COMMAND_SCHEMAS, IDENTITY_QUERY_SCHEMAS } from '@/application/commands/identity/schemas';
+import {
+  RegisterUserHandler, VerifyEmailHandler, LoginHandler, LogoutHandler,
+  RefreshSessionHandler, ChangePasswordHandler, RequestPasswordResetHandler, ResetPasswordHandler,
+} from '@/application/commands/identity/auth-commands';
+import {
+  ApproveUserHandler, RejectUserHandler, SubmitForApprovalHandler,
+} from '@/application/commands/identity/waitlist-commands';
+import {
+  SuspendUserHandler, ReactivateUserHandler, DeleteUserHandler,
+  UpdateProfileHandler, ChangeEmailHandler, EnableMfaHandler, DisableMfaHandler,
+  AssignRoleHandler, RemoveRoleHandler,
+} from '@/application/commands/identity/user-management-commands';
+import {
+  CreateOrganizationHandler, AddMemberHandler, RemoveMemberHandler, JoinOrganizationHandler,
+} from '@/application/commands/identity/organization-commands';
+import {
+  CreateApiKeyHandler, RotateApiKeyHandler, DisableApiKeyHandler,
+} from '@/application/commands/identity/api-key-commands';
+import {
+  CreateRoleHandler, UpdateRoleHandler, DeleteRoleHandler,
+  CreatePermissionHandler, DeletePermissionHandler,
+} from '@/application/commands/identity/role-commands';
+import {
+  GetUserHandler, ListUsersHandler, GetCurrentUserHandler, GetUserPermissionsHandler,
+} from '@/application/queries/identity/user-queries';
+import {
+  ListWaitlistHandler, GetWaitlistStatsHandler,
+} from '@/application/queries/identity/waitlist-queries';
+import {
+  GetOrganizationHandler, ListOrganizationsHandler, GetOrganizationMembersHandler,
+} from '@/application/queries/identity/organization-queries';
+import {
+  ListAuditLogHandler, GetAuditEntryHandler,
+} from '@/application/queries/identity/audit-queries';
+import {
+  ListApiKeysHandler, GetApiKeyHandler,
+} from '@/application/queries/identity/api-key-queries';
+import {
+  ListRolesHandler, ListPermissionsHandler,
+} from '@/application/queries/identity/role-queries';
 
 // Example command/query handlers
 import { PublishGameHandler, PublishGameSchema } from '@/application/commands/publish-game';
@@ -127,6 +189,7 @@ export async function buildContainer(): Promise<DIContainer> {
 
   // Register domain events first.
   registerAllEvents();
+  registerIdentityEvents();
 
   const c = new DIContainer();
 
@@ -253,6 +316,52 @@ export async function buildContainer(): Promise<DIContainer> {
     return new InMemoryScheduler(c.resolve(TOKENS.LockProvider));
   });
 
+  // ─── M3: Identity Infrastructure ───────────────────────────────────────────
+  c.singleton('PasswordHasher', () => new ScryptPasswordHasher());
+  c.singleton('UserRepository', (c) => new UserRepositoryImpl(
+    c.resolve(TOKENS.EventStore), c.resolve(TOKENS.SnapshotStore), c.resolve(TOKENS.OutboxRepository),
+  ));
+  c.singleton('OrganizationRepository', (c) => new OrganizationRepositoryImpl(
+    c.resolve(TOKENS.EventStore), c.resolve(TOKENS.SnapshotStore), c.resolve(TOKENS.OutboxRepository),
+  ));
+  c.singleton('RoleRepository', () => new PrismaRoleRepository());
+  c.singleton('PermissionRepository', () => new PrismaPermissionRepository());
+  c.singleton('ApiKeyRepository', () => new PrismaApiKeyRepository());
+  c.singleton('AuditLogRepository', () => new PrismaAuditLogRepository());
+  c.singleton('DeviceRepository', () => new PrismaDeviceRepository());
+  c.singleton('WaitlistRepository', () => new PrismaWaitlistRepository());
+
+  // M3: Authorization engine
+  c.singleton('RbacEngine', () => new RbacEngine());
+  c.singleton('AbacEngine', () => new AbacEngine());
+  c.singleton('PolicyEngine', (c) => new PolicyEngine(
+    c.resolve('RbacEngine'), c.resolve('AbacEngine'),
+  ));
+  c.singleton('RiskEngine', () => new RiskEngine());
+  c.singleton('TokenStore', () => new InMemoryTokenStore());
+  c.singleton('EmailService', () => new ConsoleEmailService());
+  c.singleton('UserReadModelStore', () => new PrismaUserReadModelStore());
+  c.singleton('OrganizationReadModelStore', () => new PrismaOrganizationReadModelStore());
+
+  // M3: Register identity projectors on the projection engine
+  c.singleton(TOKENS.ProjectionEngine, (c) => {
+    const engine = new ProjectionEngine(
+      c.resolve(TOKENS.EventStore),
+      c.resolve(TOKENS.CheckpointStore),
+    );
+    // M1 projectors
+    engine.register(new GameProjector());
+    engine.register(new WalletProjector());
+    engine.register(new LeaderboardProjector());
+    engine.register(new StatisticsProjector());
+    // M3 identity projectors
+    engine.register(new UserProfileProjector());
+    engine.register(new OrganizationProjector());
+    engine.register(new AuditLogProjector());
+    engine.register(new ApiKeyProjector());
+    return engine;
+  });
+
   // ─── Backup ────────────────────────────────────────────────────────────────
   c.singleton(TOKENS.BackupProvider, () => new LocalBackupProvider());
 
@@ -320,11 +429,75 @@ export async function buildContainer(): Promise<DIContainer> {
     bus.use(new AuthorizationMiddleware(() => null));
     bus.use(new TransactionMiddleware(uowFactory));
 
+    // M1 handlers
     bus.register(new PublishGameHandler(
       c.resolve(TOKENS.EventStore),
       c.resolve(TOKENS.SnapshotStore),
       c.resolve(TOKENS.OutboxRepository),
     ));
+
+    // M3: Identity command handlers
+    const userRepo = c.resolve('UserRepository');
+    const orgRepo = c.resolve('OrganizationRepository');
+    const roleRepo = c.resolve('RoleRepository');
+    const permRepo = c.resolve('PermissionRepository');
+    const apiKeyRepo = c.resolve('ApiKeyRepository');
+    const auditRepo = c.resolve('AuditLogRepository');
+    const deviceRepo = c.resolve('DeviceRepository');
+    const waitlistRepo = c.resolve('WaitlistRepository');
+    const passwordHasher = c.resolve('PasswordHasher');
+    const sessionStore = c.resolve(TOKENS.SessionStore);
+    const jwtService = c.resolve(TOKENS.JwtService);
+    const rbacEngine = c.resolve('RbacEngine');
+    const riskEngine = c.resolve('RiskEngine');
+    const tokenStore = c.resolve('TokenStore');
+    const emailService = c.resolve('EmailService');
+    const userReadModelStore = c.resolve('UserReadModelStore');
+    const orgReadModelStore = c.resolve('OrganizationReadModelStore');
+
+    // Auth commands
+    bus.register(new RegisterUserHandler(userRepo, waitlistRepo, passwordHasher, null, emailService, tokenStore));
+    bus.register(new VerifyEmailHandler(userRepo, waitlistRepo, tokenStore));
+    bus.register(new LoginHandler(userRepo, passwordHasher, sessionStore, jwtService, deviceRepo, riskEngine, null, null, null));
+    bus.register(new LogoutHandler(sessionStore, null));
+    bus.register(new RefreshSessionHandler(sessionStore, jwtService, null));
+    bus.register(new ChangePasswordHandler(userRepo, passwordHasher, null, null));
+    bus.register(new RequestPasswordResetHandler(userRepo, tokenStore, emailService));
+    bus.register(new ResetPasswordHandler(userRepo, waitlistRepo, passwordHasher, tokenStore));
+
+    // Waitlist commands
+    bus.register(new ApproveUserHandler(userRepo, null));
+    bus.register(new RejectUserHandler(userRepo, null));
+    bus.register(new SubmitForApprovalHandler(userRepo));
+
+    // User management commands
+    bus.register(new SuspendUserHandler(userRepo, null));
+    bus.register(new ReactivateUserHandler(userRepo, null));
+    bus.register(new DeleteUserHandler(userRepo, null));
+    bus.register(new UpdateProfileHandler(userRepo));
+    bus.register(new ChangeEmailHandler(userRepo, null));
+    bus.register(new EnableMfaHandler(userRepo, null));
+    bus.register(new DisableMfaHandler(userRepo, null));
+    bus.register(new AssignRoleHandler(userRepo, null));
+    bus.register(new RemoveRoleHandler(userRepo, null));
+
+    // Organization commands
+    bus.register(new CreateOrganizationHandler(orgRepo));
+    bus.register(new AddMemberHandler(orgRepo, userRepo, null));
+    bus.register(new RemoveMemberHandler(orgRepo, userRepo, null));
+    bus.register(new JoinOrganizationHandler(userRepo));
+
+    // API key commands
+    bus.register(new CreateApiKeyHandler(apiKeyRepo, { generate: () => { const k = generateApiKey(); return { plaintext: k.plaintext, hash: k.hash, prefix: k.prefix }; } }));
+    bus.register(new RotateApiKeyHandler(apiKeyRepo, { generate: () => { const k = generateApiKey(); return { plaintext: k.plaintext, hash: k.hash, prefix: k.prefix }; } }));
+    bus.register(new DisableApiKeyHandler(apiKeyRepo));
+
+    // Role and permission commands
+    bus.register(new CreateRoleHandler(roleRepo));
+    bus.register(new UpdateRoleHandler(roleRepo));
+    bus.register(new DeleteRoleHandler(roleRepo));
+    bus.register(new CreatePermissionHandler(permRepo));
+    bus.register(new DeletePermissionHandler(permRepo));
 
     return bus;
   });
@@ -339,7 +512,30 @@ export async function buildContainer(): Promise<DIContainer> {
     bus.use(new QueryMetricsMiddleware(metrics));
     bus.use(new QueryCacheMiddleware(cache, getConfig().cache.ttlSeconds));
 
+    // M1 handlers
     bus.register(new GetGameHandler(c.resolve(TOKENS.GameReadModelStore)));
+
+    // M3: Identity query handlers
+    bus.register(new GetUserHandler(c.resolve('UserReadModelStore')));
+    bus.register(new ListUsersHandler(c.resolve('UserReadModelStore')));
+    bus.register(new GetCurrentUserHandler(c.resolve('UserReadModelStore')));
+    bus.register(new GetUserPermissionsHandler(c.resolve('UserRepository'), c.resolve('RbacEngine')));
+
+    bus.register(new ListWaitlistHandler(c.resolve('WaitlistRepository')));
+    bus.register(new GetWaitlistStatsHandler(c.resolve('WaitlistRepository')));
+
+    bus.register(new GetOrganizationHandler(c.resolve('OrganizationReadModelStore')));
+    bus.register(new ListOrganizationsHandler(c.resolve('OrganizationReadModelStore')));
+    bus.register(new GetOrganizationMembersHandler(c.resolve('OrganizationReadModelStore')));
+
+    bus.register(new ListAuditLogHandler(c.resolve('AuditLogRepository')));
+    bus.register(new GetAuditEntryHandler(c.resolve('AuditLogRepository')));
+
+    bus.register(new ListApiKeysHandler(c.resolve('ApiKeyRepository')));
+    bus.register(new GetApiKeyHandler(c.resolve('ApiKeyRepository')));
+
+    bus.register(new ListRolesHandler(c.resolve('RoleRepository')));
+    bus.register(new ListPermissionsHandler(c.resolve('PermissionRepository')));
 
     return bus;
   });
@@ -347,6 +543,15 @@ export async function buildContainer(): Promise<DIContainer> {
   // ─── Register validators and policies ──────────────────────────────────────
   registerCommandValidator('PublishGame', new ZodValidator(PublishGameSchema));
   registerPolicy('PublishGame', new AllowAnyonePolicy());
+
+  // M3: Register identity validators
+  for (const [commandType, schema] of IDENTITY_COMMAND_SCHEMAS) {
+    registerCommandValidator(commandType, new ZodValidator(schema));
+    registerPolicy(commandType, new AllowAnyonePolicy()); // Will tighten with real auth
+  }
+  for (const [queryType, schema] of IDENTITY_QUERY_SCHEMAS) {
+    registerCommandValidator(queryType, new ZodValidator(schema));
+  }
 
   container = c;
   globalForContainer.__playliquidContainer = c;

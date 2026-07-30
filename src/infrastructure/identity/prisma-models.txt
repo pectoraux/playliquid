@@ -1,0 +1,149 @@
+# Identity Infrastructure — Prisma Models
+
+# Add the following models to prisma/schema.prisma.
+# These back the M3 identity layer: Role/Permission RBAC, ApiKey (hashed at
+# rest), AuditLog (append-only), Device registry, Waitlist pipeline, and the
+# read models consumed by the identity projectors.
+
+# ─── Role / Permission (RBAC data-driven) ────────────────────────────────────
+
+model Role {
+  id          String   @id
+  name        String   @unique
+  description String   @default("")
+  permissions String   @default("[]")  # JSON-encoded string[] of permission IDs
+  isSystem    Boolean  @default(false) # system roles cannot be deleted
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([name])
+}
+
+model Permission {
+  id          String   @id  # format: "resource.action" (e.g. "game.publish")
+  resource    String
+  action      String
+  description String   @default("")
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@unique([resource, action])
+  @@index([resource])
+}
+
+# ─── API Keys (hashed, displayed once) ──────────────────────────────────────
+
+model ApiKey {
+  id          String    @id
+  userId      String
+  name        String
+  keyHash     String    @unique  # SHA-256 of plaintext
+  keyPrefix   String              # first 12 chars for display
+  scopes      String    @default("[]")  # JSON-encoded string[]
+  expiresAt   DateTime?
+  lastUsedAt  DateTime?
+  lastUsedIp  String?
+  createdAt   DateTime  @default(now())
+  revokedAt   DateTime?
+  active      Boolean   @default(true)
+
+  @@index([userId])
+  @@index([keyHash])
+  @@index([active])
+}
+
+# ─── Audit Log (append-only) ────────────────────────────────────────────────
+
+model AuditLog {
+  id            String   @id
+  action        String
+  actorId       String
+  actorType     String   # 'user' | 'system' | 'api_key'
+  targetType    String
+  targetId      String
+  timestamp     String   # ISO 8601 — domain event time
+  ipAddress     String?
+  userAgent     String?
+  metadata      String   @default("{}")  # JSON-encoded record
+  correlationId String?
+  createdAt     DateTime @default(now())
+
+  @@index([actorId, timestamp])
+  @@index([targetType, targetId])
+  @@index([action])
+  @@index([timestamp])
+  @@index([correlationId])
+}
+
+# ─── Device Registry (trusted / risky devices) ──────────────────────────────
+
+model Device {
+  id            String   @id
+  userId        String
+  name          String
+  browser       String   @default("")
+  os            String   @default("")
+  ipAddress     String
+  location      String?
+  fingerprint   String
+  riskScore     Int      @default(0)  # 0-100
+  trusted       Boolean  @default(false)
+  firstSeenAt   String   # ISO 8601
+  lastSeenAt    String   # ISO 8601
+  revokedAt     String?
+
+  @@unique([userId, fingerprint])
+  @@index([userId])
+  @@index([fingerprint])
+}
+
+# ─── Waitlist ───────────────────────────────────────────────────────────────
+
+model WaitlistEntry {
+  id                String   @id
+  email             String   @unique
+  username          String
+  status            String   @default("pending")  # pending | email_verified | approved | rejected | converted
+  verificationToken String?
+  verifiedAt        String?
+  approvalNotes     String?
+  rejectionReason   String?
+  invitedById       String?
+  createdAt         String   # ISO 8601
+  updatedAt         String   # ISO 8601
+
+  @@index([status])
+  @@index([username])
+}
+
+# ─── Organization Read Models (for projectors) ──────────────────────────────
+
+model OrganizationReadModel {
+  id          String   @id @default(cuid())
+  orgId       String   @unique
+  name        String
+  slug        String   @unique
+  type        String
+  createdById String
+  active      Boolean  @default(true)
+  createdAt   String
+  updatedAt   DateTime @updatedAt
+
+  @@index([slug])
+  @@index([createdById])
+}
+
+model OrganizationMemberReadModel {
+  id             String   @id @default(cuid())
+  orgId          String
+  userId         String
+  roleId         String
+  status         String   @default("active")  # active | invited | removed
+  joinedAt       String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([orgId, userId])
+  @@index([orgId])
+  @@index([userId])
+}

@@ -25,7 +25,7 @@ type EventConstructor<TPayload extends DomainEventPayload = DomainEventPayload> 
 const registry = new Map<string, EventConstructor<any>>();
 const typeByName = new Map<string, string>();
 
-/** Register an event class. */
+/** Register an event class. Throws if already registered. */
 export function registerEvent<TPayload extends DomainEventPayload>(
   eventType: string,
   constructor: EventConstructor<TPayload>,
@@ -33,6 +33,16 @@ export function registerEvent<TPayload extends DomainEventPayload>(
   if (registry.has(eventType)) {
     throw new ConfigurationError(`Event type "${eventType}" is already registered`);
   }
+  registry.set(eventType, constructor);
+  typeByName.set(constructor.name, eventType);
+}
+
+/** Register an event class, silently skipping if already registered. */
+export function registerEventSafe<TPayload extends DomainEventPayload>(
+  eventType: string,
+  constructor: EventConstructor<TPayload>,
+): void {
+  if (registry.has(eventType)) return;
   registry.set(eventType, constructor);
   typeByName.set(constructor.name, eventType);
 }

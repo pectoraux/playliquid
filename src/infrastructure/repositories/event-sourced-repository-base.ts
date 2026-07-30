@@ -87,8 +87,14 @@ export abstract class EventSourcedRepositoryBase<TAggregate extends AggregateRoo
     const events = aggregate.pullEvents();
     if (events.length === 0) return;
 
+    // The expected version is the stream version BEFORE these events are appended.
+    // If the aggregate was just created (version = events.length), the stream
+    // version is 0. If loaded from store (version = loadedVersion + events.length),
+    // the stream version is loadedVersion = aggregate.version - events.length.
+    const streamVersion = aggregate.version - events.length;
+
     // Append events + write to outbox in the same transaction.
-    await this.eventStore.append(events, expectedVersion);
+    await this.eventStore.append(events, streamVersion);
 
     if (this.outbox) {
       await this.outbox.appendMany(events.map((e) => e.serialize()));
