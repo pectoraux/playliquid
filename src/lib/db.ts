@@ -15,7 +15,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { PrismaLibSQL } from '@prisma/adapter-libsql';
+import { PrismaLibSql } from '@prisma/adapter-libsql';
 import { createClient } from '@libsql/client';
 import { getEnvVar } from '@/shared/config';
 
@@ -30,7 +30,7 @@ function createPrismaClient(): PrismaClient {
   if (databaseUrl.startsWith('libsql://') || databaseUrl.startsWith('libsql:')) {
     const authToken = getEnvVar('DATABASE_AUTH_TOKEN') || '';
     const libsql = createClient({ url: databaseUrl, authToken });
-    const adapter = new PrismaLibSQL(libsql);
+    const adapter = new PrismaLibSql(libsql);
     return new PrismaClient({ adapter } as never);
   }
 
