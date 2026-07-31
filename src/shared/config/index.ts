@@ -8,6 +8,16 @@
  */
 
 import { z } from 'zod';
+import { config as dotenvConfig } from 'dotenv';
+
+// Load .env file eagerly — must happen before any Prisma client init
+let envLoaded = false;
+export function loadEnv(): void {
+  if (envLoaded) return;
+  dotenvConfig();
+  envLoaded = true;
+}
+loadEnv();
 
 const LogLevel = z.enum(['debug', 'info', 'warn', 'error', 'fatal']);
 const NodeEnv = z.enum(['development', 'test', 'production']);

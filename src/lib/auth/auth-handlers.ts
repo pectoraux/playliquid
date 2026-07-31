@@ -5,11 +5,9 @@
  */
 
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { db as prisma } from '@/lib/db';
 import { verifyPassword, createSessionToken, verifySessionToken, SESSION_COOKIE, SESSION_TTL_SECONDS, type SessionPayload } from '@/lib/auth/session';
 import { getConfig } from '@/shared/config';
-
-const prisma = new PrismaClient();
 
 /** POST /api/auth/v2/login — authenticate user and set session cookie. */
 export async function handleLogin(req: Request): Promise<NextResponse> {
