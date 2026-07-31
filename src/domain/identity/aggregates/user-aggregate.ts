@@ -378,8 +378,8 @@ export class UserAggregate extends AggregateRoot<string> {
 
   // ─── Event Handlers ───────────────────────────────────────────────────────
 
-  private applyUserCreated(event: { payload: UserCreatedPayload }): void {
-    const p = event.payload;
+  private applyUserCreated(event: { payload: Record<string, unknown> }): void {
+    const p = event.payload as Record<string, string>;
     this._email = p.email;
     this._username = p.username;
     this._displayName = p.displayName;
@@ -389,82 +389,82 @@ export class UserAggregate extends AggregateRoot<string> {
     this._status = 'waitlist';
   }
 
-  private applyUserApproved(event: { payload: UserApprovedPayload }): void {
+  private applyUserApproved(event: { payload: Record<string, unknown> }): void {
     this._status = 'active';
-    this._approvalNotes = event.payload.approvalNotes;
+    this._approvalNotes = String(event.payload.approvalNotes);
   }
 
-  private applyUserRejected(event: { payload: UserRejectedPayload }): void {
+  private applyUserRejected(event: { payload: Record<string, unknown> }): void {
     this._status = 'rejected';
-    this._rejectionReason = event.payload.rejectionReason;
+    this._rejectionReason = String(event.payload.rejectionReason);
   }
 
-  private applyUserSuspendedM3(event: { payload: UserSuspendedPayload }): void {
+  private applyUserSuspendedM3(event: { payload: Record<string, unknown> }): void {
     this._status = 'suspended';
-    this._suspensionReason = event.payload.reason;
+    this._suspensionReason = String(event.payload.reason);
   }
 
-  private applyUserReactivated(_event: { payload: UserReactivatedPayload }): void {
+  private applyUserReactivated(_event: { payload: Record<string, unknown> }): void {
     this._status = 'active';
     this._suspensionReason = null;
   }
 
-  private applyUserDeleted(_event: { payload: UserDeletedPayload }): void {
+  private applyUserDeleted(_event: { payload: Record<string, unknown> }): void {
     this._status = 'deleted';
   }
 
-  private applyUserProfileUpdated(event: { payload: UserProfileUpdatedPayload }): void {
-    this._displayName = event.payload.displayName;
-    this._timezone = event.payload.timezone;
-    this._locale = event.payload.locale;
+  private applyUserProfileUpdated(event: { payload: Record<string, unknown> }): void {
+    this._displayName = String(event.payload.displayName);
+    this._timezone = String(event.payload.timezone);
+    this._locale = String(event.payload.locale);
   }
 
-  private applyUserEmailChanged(event: { payload: UserEmailChangedPayload }): void {
-    this._email = event.payload.newEmail;
+  private applyUserEmailChanged(event: { payload: Record<string, unknown> }): void {
+    this._email = String(event.payload.newEmail);
     this._emailVerified = false;
   }
 
-  private applyUserPasswordChanged(_event: { payload: UserPasswordChangedPayload }): void {
+  private applyUserPasswordChanged(_event: { payload: Record<string, unknown> }): void {
     // passwordHash is set directly by changePassword
   }
 
-  private applyUserEmailVerified(_event: { payload: UserEmailVerifiedPayload }): void {
+  private applyUserEmailVerified(_event: { payload: Record<string, unknown> }): void {
     this._emailVerified = true;
   }
 
-  private applyUserMfaEnabled(event: { payload: UserMfaEnabledPayload }): void {
+  private applyUserMfaEnabled(event: { payload: Record<string, unknown> }): void {
     this._mfaEnabled = true;
-    this._mfaMethod = event.payload.method;
+    this._mfaMethod = String(event.payload.method);
   }
 
-  private applyUserMfaDisabled(_event: { payload: UserMfaDisabledPayload }): void {
+  private applyUserMfaDisabled(_event: { payload: Record<string, unknown> }): void {
     this._mfaEnabled = false;
     this._mfaMethod = null;
   }
 
-  private applyRoleAssigned(event: { payload: RoleAssignedPayload }): void {
+  private applyRoleAssigned(event: { payload: Record<string, unknown> }): void {
     this._roles = [...this._roles, {
-      roleId: event.payload.roleId,
-      roleName: event.payload.roleName,
-      assignedAt: event.payload.assignedAt,
-      assignedBy: event.payload.assignedBy,
+      roleId: String(event.payload.roleId),
+      roleName: String(event.payload.roleName),
+      assignedAt: String(event.payload.assignedAt),
+      assignedBy: String(event.payload.assignedBy),
     }];
   }
 
-  private applyRoleRemoved(event: { payload: RoleRemovedPayload }): void {
-    this._roles = this._roles.filter((r) => r.roleId !== event.payload.roleId);
+  private applyRoleRemoved(event: { payload: Record<string, unknown> }): void {
+    this._roles = this._roles.filter((r) => r.roleId !== String(event.payload.roleId));
   }
 
-  private applyOrganizationJoined(event: { payload: OrganizationJoinedPayload }): void {
+  private applyOrganizationJoined(event: { payload: Record<string, unknown> }): void {
     this._memberships = [...this._memberships, {
-      organizationId: event.payload.organizationId,
-      roleId: event.payload.roleId,
-      joinedAt: event.payload.joinedAt,
+      organizationId: String(event.payload.organizationId),
+      roleId: String(event.payload.roleId),
+      joinedAt: String(event.payload.joinedAt),
     }];
   }
 
-  private applyOrganizationLeft(event: { payload: OrganizationLeftPayload }): void {
-    this._memberships = this._memberships.filter((m) => m.organizationId !== event.payload.organizationId);
+  private applyOrganizationLeft(event: { payload: Record<string, unknown> }): void {
+    this._memberships = this._memberships.filter((m) => m.organizationId !== String(event.payload.organizationId));
   }
 
   // ─── Aggregate Contract ───────────────────────────────────────────────────

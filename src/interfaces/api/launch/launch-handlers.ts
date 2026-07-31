@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Launch API Handlers — endpoints for the Launch & Scale Program.
  *

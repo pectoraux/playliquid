@@ -13,6 +13,8 @@ export interface Query<TResult = unknown> {
   readonly correlationId?: string;
   readonly userId?: string;
   readonly metadata?: Metadata;
+  /** Optional payload (queries with typed payloads use QueryWithPayload). */
+  readonly payload?: unknown;
 }
 
 /** A query that carries a typed payload (filter criteria). */

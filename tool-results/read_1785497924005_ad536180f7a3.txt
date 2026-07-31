@@ -1,0 +1,728 @@
+     1→/**
+     2→ * Composition Root — wires all services into the DI container.
+     3→ *
+     4→ * This is the ONLY place where concrete implementations are selected and
+     5→ * connected. All other code depends on interfaces resolved through the
+     6→ * container. Changing an implementation (e.g., swapping InMemoryEventBus
+     7→ * for RedisEventBus, or LocalStorage for S3Storage) only requires editing
+     8→ * this file.
+     9→ */
+    10→
+    11→import { DIContainer } from '@/infrastructure/di/container';
+    12→import { TOKENS } from '@/infrastructure/di/tokens';
+    13→
+    14→// Re-export TOKENS so consumers can import both getContainer and TOKENS from one module.
+    15→export { TOKENS } from '@/infrastructure/di/tokens';
+    16→
+    17→// Core infrastructure
+    18→import { prisma } from '@/infrastructure/database/prisma';
+    19→import { PrismaUnitOfWorkFactory } from '@/infrastructure/database/unit-of-work';
+    20→import { PrismaEventStore } from '@/infrastructure/event-store/event-store';
+    21→import { PrismaSnapshotStore } from '@/infrastructure/event-store/snapshot-store';
+    22→import { OutboxRepository, OutboxPublisher } from '@/infrastructure/outbox/outbox';
+    23→import { InMemoryEventBus } from '@/infrastructure/event-bus/event-bus';
+    24→import { InMemoryCache } from '@/infrastructure/cache/cache';
+    25→import { InMemoryMetricsRecorder } from '@/infrastructure/telemetry/metrics';
+    26→import { PrismaIdempotencyStore } from '@/infrastructure/repositories/idempotency-store-impl';
+    27→import { PrismaGameReadModelStore } from '@/infrastructure/repositories/game-read-model-store';
+    28→import { CheckpointStore, ProjectionEngine } from '@/infrastructure/projections/projection-engine';
+    29→import { WalletProjector, LeaderboardProjector, StatisticsProjector } from '@/infrastructure/projections/projectors';
+    30→import { GameProjector } from '@/infrastructure/projections/game-projector';
+    31→import { HealthCheckRegistry, registerDefaultHealthChecks } from '@/infrastructure/telemetry/health-checks';
+    32→
+    33→// M2: Redis platform
+    34→import { getRedisClient } from '@/infrastructure/redis/redis-client';
+    35→
+    36→// M2: Cache & Locking
+    37→import { MemoryCacheProvider, RedisCacheProvider } from '@/infrastructure/cache/cache-provider';
+    38→import { MemoryLockProvider, RedisLockProvider } from '@/infrastructure/locking/lock-provider';
+    39→
+    40→// M2: Circuit breakers
+    41→import { CircuitBreakerRegistry } from '@/infrastructure/circuit-breaker/circuit-breaker';
+    42→
+    43→// M2: Rate limiting
+    44→import { MemoryRateLimiter, RedisRateLimiter } from '@/infrastructure/rate-limiting/rate-limiter';
+    45→
+    46→// M2: Queue
+    47→import { InMemoryQueue } from '@/infrastructure/queue/message-queue';
+    48→import { PrismaDeadLetterQueue } from '@/infrastructure/queue/dead-letter-queue';
+    49→
+    50→// M2: Workers & Scheduler
+    51→import { WorkerRegistry } from '@/infrastructure/workers/worker-framework';
+    52→import { OutboxWorker, ProjectionWorker, CleanupWorker, AnalyticsWorker } from '@/infrastructure/workers/workers';
+    53→import { InMemoryScheduler } from '@/infrastructure/scheduler/scheduler';
+    54→
+    55→// M2: Storage & CDN & Search
+    56→import { LocalStorageProvider } from '@/infrastructure/storage/storage-provider';
+    57→import { LocalCdnProvider } from '@/infrastructure/cdn/cdn-provider';
+    58→import { InMemorySearchProvider } from '@/infrastructure/search/search-provider';
+    59→
+    60→// M2: Platform services
+    61→import { CachedFeatureFlagService } from '@/infrastructure/feature-flags/feature-flags';
+    62→import { EnvironmentSecretProvider } from '@/infrastructure/secrets/secret-provider';
+    63→import { DefaultConfigService } from '@/infrastructure/config/config-service';
+    64→
+    65→// M2: Notifications
+    66→import { ConsoleEmailProvider } from '@/infrastructure/email/email-provider';
+    67→import { ConsoleSmsProvider } from '@/infrastructure/sms/sms-provider';
+    68→import { ConsolePushProvider } from '@/infrastructure/push/push-provider';
+    69→import { DefaultWebhookEngine } from '@/infrastructure/webhook/webhook-engine';
+    70→import { InMemorySessionStore, HmacJwtService } from '@/infrastructure/sessions/session-store';
+    71→
+    72→// M2: Operations
+    73→import { InMemoryMetricsFramework } from '@/infrastructure/metrics/metrics-framework';
+    74→import { ExtendedHealthCheckRegistry, registerExtendedHealthChecks } from '@/infrastructure/telemetry/extended-health-checks';
+    75→import { LocalBackupProvider } from '@/infrastructure/backup/backup-framework';
+    76→import { DefaultDisasterRecoveryService } from '@/infrastructure/recovery/disaster-recovery';
+    77→import { DefaultPerformanceMiddleware } from '@/infrastructure/performance/performance';
+    78→import {
+    79→  ProductionStartupValidator,
+    80→  GracefulShutdownManager,
+    81→  ReadinessGateImpl,
+    82→  MaintenanceModeImpl,
+    83→} from '@/infrastructure/recovery/production-operations';
+    84→
+    85→// Application
+    86→import { CommandBus } from '@/application/buses/command-bus';
+    87→import { QueryBus } from '@/application/buses/query-bus';
+    88→import { CorrelationMiddleware } from '@/application/pipelines/correlation-pipeline';
+    89→import { LoggingMiddleware } from '@/application/pipelines/logging-pipeline';
+    90→import { MetricsMiddleware } from '@/application/pipelines/metrics-pipeline';
+    91→import { IdempotencyMiddleware } from '@/application/pipelines/idempotency-pipeline';
+    92→import { ValidationMiddleware } from '@/application/pipelines/validation-pipeline';
+    93→import { AuthorizationMiddleware } from '@/application/pipelines/authorization-pipeline';
+    94→import { TransactionMiddleware } from '@/application/pipelines/transaction-pipeline';
+    95→import { QueryLoggingMiddleware, QueryMetricsMiddleware, QueryCacheMiddleware } from '@/application/pipelines/query-pipelines';
+    96→import { ZodValidator, registerCommandValidator } from '@/application/validation/validator';
+    97→import { AllowAnyonePolicy, registerPolicy } from '@/application/authorization/policy';
+    98→
+    99→// Domain events
+   100→import { registerAllEvents } from '@/domain/events';
+   101→import { registerIdentityEvents } from '@/domain/identity/events';
+   102→
+   103→// M3: Identity infrastructure
+   104→import { Argon2PasswordHasher as ScryptPasswordHasher } from '@/infrastructure/identity/argon2-password-hasher';
+   105→import { UserRepositoryImpl } from '@/infrastructure/identity/user-repository-impl';
+   106→import { OrganizationRepositoryImpl } from '@/infrastructure/identity/organization-repository-impl';
+   107→import { PrismaRoleRepository } from '@/infrastructure/identity/prisma-role-repository';
+   108→import { PrismaPermissionRepository } from '@/infrastructure/identity/prisma-permission-repository';
+   109→import { PrismaApiKeyRepository } from '@/infrastructure/identity/prisma-api-key-repository';
+   110→import { PrismaAuditLogRepository } from '@/infrastructure/identity/prisma-audit-log-repository';
+   111→import { PrismaDeviceRepository } from '@/infrastructure/identity/prisma-device-repository';
+   112→import { PrismaWaitlistRepository } from '@/infrastructure/identity/prisma-waitlist-repository';
+   113→import { UserProfileProjector, OrganizationProjector, AuditLogProjector, ApiKeyProjector } from '@/infrastructure/identity/identity-projectors';
+   114→import { PrismaUserReadModelStore, PrismaOrganizationReadModelStore } from '@/infrastructure/identity/read-model-stores';
+   115→import { InMemoryTokenStore } from '@/infrastructure/identity/token-store';
+   116→import { ConsoleEmailService } from '@/infrastructure/identity/email-service';
+   117→import { generateApiKey } from '@/infrastructure/identity/api-key-generator';
+   118→import { RbacEngine, AbacEngine, PolicyEngine } from '@/domain/identity/policies/authorization-engine';
+   119→import { RiskEngine } from '@/domain/identity/services/risk-engine';
+   120→
+   121→// M3: Identity commands and queries
+   122→import { IDENTITY_COMMAND_SCHEMAS, IDENTITY_QUERY_SCHEMAS } from '@/application/commands/identity/schemas';
+   123→import {
+   124→  RegisterUserHandler, VerifyEmailHandler, LoginHandler, LogoutHandler,
+   125→  RefreshSessionHandler, ChangePasswordHandler, RequestPasswordResetHandler, ResetPasswordHandler,
+   126→} from '@/application/commands/identity/auth-commands';
+   127→import {
+   128→  ApproveUserHandler, RejectUserHandler, SubmitForApprovalHandler,
+   129→} from '@/application/commands/identity/waitlist-commands';
+   130→import {
+   131→  SuspendUserHandler, ReactivateUserHandler, DeleteUserHandler,
+   132→  UpdateProfileHandler, ChangeEmailHandler, EnableMfaHandler, DisableMfaHandler,
+   133→  AssignRoleHandler, RemoveRoleHandler,
+   134→} from '@/application/commands/identity/user-management-commands';
+   135→import {
+   136→  CreateOrganizationHandler, AddMemberHandler, RemoveMemberHandler, JoinOrganizationHandler,
+   137→} from '@/application/commands/identity/organization-commands';
+   138→import {
+   139→  CreateApiKeyHandler, RotateApiKeyHandler, DisableApiKeyHandler,
+   140→} from '@/application/commands/identity/api-key-commands';
+   141→import {
+   142→  CreateRoleHandler, UpdateRoleHandler, DeleteRoleHandler,
+   143→  CreatePermissionHandler, DeletePermissionHandler,
+   144→} from '@/application/commands/identity/role-commands';
+   145→import {
+   146→  GetUserHandler, ListUsersHandler, GetCurrentUserHandler, GetUserPermissionsHandler,
+   147→} from '@/application/queries/identity/user-queries';
+   148→import {
+   149→  ListWaitlistHandler, GetWaitlistStatsHandler,
+   150→} from '@/application/queries/identity/waitlist-queries';
+   151→import {
+   152→  GetOrganizationHandler, ListOrganizationsHandler, GetOrganizationMembersHandler,
+   153→} from '@/application/queries/identity/organization-queries';
+   154→import {
+   155→  ListAuditLogHandler, GetAuditEntryHandler,
+   156→} from '@/application/queries/identity/audit-queries';
+   157→import {
+   158→  ListApiKeysHandler, GetApiKeyHandler,
+   159→} from '@/application/queries/identity/api-key-queries';
+   160→import {
+   161→  ListRolesHandler, ListPermissionsHandler,
+   162→} from '@/application/queries/identity/role-queries';
+   163→
+   164→// Launch & Scale: Infrastructure
+   165→import { registerLaunchEvents } from '@/domain/launch/events';
+   166→import { BetaCohortRepositoryImpl } from '@/infrastructure/launch/beta-cohort-repository-impl';
+   167→import { PrismaFeedbackRepository } from '@/infrastructure/launch/prisma-feedback-repository';
+   168→import { PrismaValidationRunRepository } from '@/infrastructure/launch/prisma-validation-run-repository';
+   169→import { PrismaReconciliationRepository } from '@/infrastructure/launch/prisma-reconciliation-repository';
+   170→import { PrismaSessionReplayRepository } from '@/infrastructure/launch/prisma-session-replay-repository';
+   171→import { PrismaBugRepository } from '@/infrastructure/launch/prisma-bug-repository';
+   172→import { PrismaPerformanceMetricRepository } from '@/infrastructure/launch/prisma-performance-metric-repository';
+   173→import { PrismaReconciliationSource } from '@/infrastructure/launch/reconciliation-source';
+   174→import { PrismaBetaCohortReadModelStore } from '@/infrastructure/launch/beta-cohort-read-model-store';
+   175→import { BetaCohortProjector } from '@/infrastructure/launch/beta-cohort-projector';
+   176→import { createPlatformValidationSuites } from '@/infrastructure/launch/validation-suites';
+   177→import { ReconciliationService } from '@/domain/launch/services/reconciliation-service';
+   178→import { ValidationSuiteRunner } from '@/domain/launch/services/validation-suite';
+   179→
+   180→// Launch & Scale: Commands and queries
+   181→import { LAUNCH_COMMAND_SCHEMAS, LAUNCH_QUERY_SCHEMAS } from '@/application/commands/launch/schemas';
+   182→import {
+   183→  CreateCohortHandler, InviteParticipantHandler, AcceptInvitationHandler, RevokeInvitationHandler,
+   184→} from '@/application/commands/launch/beta-commands';
+   185→import { SubmitFeedbackHandler, TriageFeedbackHandler } from '@/application/commands/launch/feedback-commands';
+   186→import { StartValidationRunHandler, CompleteValidationRunHandler } from '@/application/commands/launch/validation-commands';
+   187→import { RunReconciliationHandler } from '@/application/commands/launch/reconciliation-commands';
+   188→import { ReportBugHandler, ResolveBugHandler, AssignBugHandler } from '@/application/commands/launch/bug-commands';
+   189→import { RecordMetricHandler } from '@/application/commands/launch/performance-commands';
+   190→import { RecordSessionHandler } from '@/application/commands/launch/session-replay-commands';
+   191→import {
+   192→  GetCohortHandler, ListCohortsHandler, GetCohortParticipantsHandler,
+   193→} from '@/application/queries/launch/beta-queries';
+   194→import { ListFeedbackHandler, GetFeedbackStatsHandler } from '@/application/queries/launch/feedback-queries';
+   195→import { GetValidationRunHandler, ListValidationRunsHandler, GetLatestValidationHandler } from '@/application/queries/launch/validation-queries';
+   196→import { GetReconciliationHandler, ListReconciliationsHandler, GetLatestReconciliationHandler } from '@/application/queries/launch/reconciliation-queries';
+   197→import { ListBugsHandler, GetBugStatsHandler } from '@/application/queries/launch/bug-queries';
+   198→import { GetPerformanceSummaryHandler, ListMetricsHandler } from '@/application/queries/launch/performance-queries';
+   199→import { ListSessionReplaysHandler } from '@/application/queries/launch/session-replay-queries';
+   200→
+   201→// Example command/query handlers
+   202→import { PublishGameHandler, PublishGameSchema } from '@/application/commands/publish-game';
+   203→import { GetGameHandler } from '@/application/queries/get-game';
+   204→
+   205→import { getConfig } from '@/shared/config';
+   206→import { logger } from '@/shared/logging';
+   207→
+   208→// Use global to persist across Next.js dev-mode module reloads.
+   209→const globalForContainer = globalThis as unknown as {
+   210→  __playliquidContainer?: DIContainer;
+   211→  __playliquidContainerBuilding?: Promise<DIContainer>;
+   212→};
+   213→
+   214→let container: DIContainer | null = globalForContainer.__playliquidContainer ?? null;
+   215→
+   216→/** Build and configure the DI container. */
+   217→export async function buildContainer(): Promise<DIContainer> {
+   218→  if (container) return container;
+   219→
+   220→  // Prevent concurrent builds (multiple requests arriving simultaneously)
+   221→  if (globalForContainer.__playliquidContainerBuilding) {
+   222→    return globalForContainer.__playliquidContainerBuilding;
+   223→  }
+   224→
+   225→  const buildPromise = (async () => {
+   226→
+   227→  // Register domain events first.
+   228→  registerAllEvents();
+   229→  registerIdentityEvents();
+   230→  registerLaunchEvents();
+   231→
+   232→  const c = new DIContainer();
+   233→
+   234→  // ─── Core infrastructure ───────────────────────────────────────────────────
+   235→  c.bind(TOKENS.PrismaClient, prisma);
+   236→  c.singleton(TOKENS.EventStore, () => new PrismaEventStore());
+   237→  c.singleton(TOKENS.SnapshotStore, () => new PrismaSnapshotStore());
+   238→  c.singleton(TOKENS.OutboxRepository, () => new OutboxRepository());
+   239→  c.singleton(TOKENS.EventBus, () => new InMemoryEventBus());
+   240→  c.singleton(TOKENS.Cache, () => new InMemoryCache(getConfig().cache.maxSize));
+   241→  c.singleton(TOKENS.MetricsRecorder, () => new InMemoryMetricsRecorder());
+   242→  c.singleton(TOKENS.IdempotencyStore, () => new PrismaIdempotencyStore());
+   243→  c.singleton(TOKENS.GameReadModelStore, () => new PrismaGameReadModelStore());
+   244→  c.singleton(TOKENS.CheckpointStore, () => new CheckpointStore());
+   245→  c.singleton(TOKENS.UnitOfWorkFactory, () => new PrismaUnitOfWorkFactory());
+   246→
+   247→  // ─── Redis platform ────────────────────────────────────────────────────────
+   248→  const redisClient = await getRedisClient();
+   249→  c.bind(TOKENS.RedisClient, redisClient);
+   250→
+   251→  // ─── Cache provider (Redis if available, else memory) ─────────────────────
+   252→  c.singleton(TOKENS.CacheProvider, (c) => {
+   253→    const redis = c.resolve(TOKENS.RedisClient);
+   254→    if (redis.backend === 'redis') {
+   255→      return new RedisCacheProvider(redis);
+   256→    }
+   257→    return new MemoryCacheProvider(getConfig().cache.maxSize);
+   258→  });
+   259→
+   260→  // ─── Distributed lock provider ─────────────────────────────────────────────
+   261→  c.singleton(TOKENS.LockProvider, (c) => {
+   262→    const redis = c.resolve(TOKENS.RedisClient);
+   263→    if (redis.backend === 'redis') {
+   264→      return new RedisLockProvider(redis);
+   265→    }
+   266→    return new MemoryLockProvider();
+   267→  });
+   268→
+   269→  // ─── Circuit breaker registry ─────────────────────────────────────────────
+   270→  c.singleton(TOKENS.CircuitBreakerRegistry, () => new CircuitBreakerRegistry());
+   271→
+   272→  // ─── Rate limiter ──────────────────────────────────────────────────────────
+   273→  c.singleton(TOKENS.RateLimiter, (c) => {
+   274→    const redis = c.resolve(TOKENS.RedisClient);
+   275→    if (redis.backend === 'redis') {
+   276→      return new RedisRateLimiter(redis);
+   277→    }
+   278→    return new MemoryRateLimiter();
+   279→  });
+   280→
+   281→  // ─── Message queue + DLQ ───────────────────────────────────────────────────
+   282→  c.singleton(TOKENS.MessageQueue, () => new InMemoryQueue());
+   283→  c.singleton(TOKENS.DeadLetterQueue, () => new PrismaDeadLetterQueue());
+   284→
+   285→  // ─── Storage / CDN / Search ────────────────────────────────────────────────
+   286→  c.singleton(TOKENS.StorageProvider, () => new LocalStorageProvider(getEnvVar('STORAGE_ROOT') || './storage'));
+   287→  c.singleton(TOKENS.CdnProvider, () => new LocalCdnProvider(getEnvVar('CDN_BASE_URL') || ''));
+   288→  c.singleton(TOKENS.SearchProvider, () => new InMemorySearchProvider());
+   289→
+   290→  // ─── Platform services ─────────────────────────────────────────────────────
+   291→  c.singleton(TOKENS.FeatureFlagService, () => new CachedFeatureFlagService());
+   292→  c.singleton(TOKENS.SecretProvider, () => new EnvironmentSecretProvider());
+   293→  c.singleton(TOKENS.ConfigService, () => new DefaultConfigService());
+   294→
+   295→  // ─── Notifications ─────────────────────────────────────────────────────────
+   296→  c.singleton(TOKENS.EmailProvider, () => new ConsoleEmailProvider());
+   297→  c.singleton(TOKENS.SmsProvider, () => new ConsoleSmsProvider());
+   298→  c.singleton(TOKENS.PushProvider, () => new ConsolePushProvider());
+   299→  c.singleton(TOKENS.WebhookEngine, () => new DefaultWebhookEngine());
+   300→  c.singleton(TOKENS.SessionStore, () => new InMemorySessionStore());
+   301→  c.singleton(TOKENS.JwtService, () => new HmacJwtService(getConfig().auth.secret));
+   302→
+   303→  // ─── Metrics framework ─────────────────────────────────────────────────────
+   304→  c.singleton(TOKENS.MetricsFramework, () => new InMemoryMetricsFramework());
+   305→
+   306→  // ─── Outbox publisher ──────────────────────────────────────────────────────
+   307→  c.singleton(TOKENS.OutboxPublisher, (c) => {
+   308→    return new OutboxPublisher(
+   309→      c.resolve(TOKENS.OutboxRepository),
+   310→      c.resolve(TOKENS.EventBus),
+   311→    );
+   312→  });
+   313→
+   314→  // ─── Projection engine ─────────────────────────────────────────────────────
+   315→  c.singleton(TOKENS.ProjectionEngine, (c) => {
+   316→    const engine = new ProjectionEngine(
+   317→      c.resolve(TOKENS.EventStore),
+   318→      c.resolve(TOKENS.CheckpointStore),
+   319→    );
+   320→    engine.register(new GameProjector());
+   321→    engine.register(new WalletProjector());
+   322→    engine.register(new LeaderboardProjector());
+   323→    engine.register(new StatisticsProjector());
+   324→    return engine;
+   325→  });
+   326→
+   327→  // ─── Worker registry ───────────────────────────────────────────────────────
+   328→  c.singleton(TOKENS.WorkerRegistry, (c) => {
+   329→    const registry = new WorkerRegistry();
+   330→    const config = getConfig();
+   331→
+   332→    if (config.featureFlags.outboxWorker) {
+   333→      registry.register(new OutboxWorker(
+   334→        c.resolve(TOKENS.OutboxPublisher),
+   335→        config.outbox.pollIntervalMs,
+   336→      ));
+   337→    }
+   338→
+   339→    if (config.featureFlags.projectionWorker) {
+   340→      registry.register(new ProjectionWorker(
+   341→        c.resolve(TOKENS.ProjectionEngine),
+   342→        config.projections.pollIntervalMs,
+   343→      ));
+   344→    }
+   345→
+   346→    registry.register(new CleanupWorker(60000)); // every 60s
+   347→    registry.register(new AnalyticsWorker(c.resolve(TOKENS.EventStore), 30000)); // every 30s
+   348→
+   349→    return registry;
+   350→  });
+   351→
+   352→  // ─── Scheduler ─────────────────────────────────────────────────────────────
+   353→  c.singleton(TOKENS.Scheduler, (c) => {
+   354→    return new InMemoryScheduler(c.resolve(TOKENS.LockProvider));
+   355→  });
+   356→
+   357→  // ─── M3: Identity Infrastructure ───────────────────────────────────────────
+   358→  c.singleton('PasswordHasher', () => new ScryptPasswordHasher());
+   359→  c.singleton('UserRepository', (c) => new UserRepositoryImpl(
+   360→    c.resolve(TOKENS.EventStore), c.resolve(TOKENS.SnapshotStore), c.resolve(TOKENS.OutboxRepository),
+   361→  ));
+   362→  c.singleton('OrganizationRepository', (c) => new OrganizationRepositoryImpl(
+   363→    c.resolve(TOKENS.EventStore), c.resolve(TOKENS.SnapshotStore), c.resolve(TOKENS.OutboxRepository),
+   364→  ));
+   365→  c.singleton('RoleRepository', () => new PrismaRoleRepository());
+   366→  c.singleton('PermissionRepository', () => new PrismaPermissionRepository());
+   367→  c.singleton('ApiKeyRepository', () => new PrismaApiKeyRepository());
+   368→  c.singleton('AuditLogRepository', () => new PrismaAuditLogRepository());
+   369→  c.singleton('DeviceRepository', () => new PrismaDeviceRepository());
+   370→  c.singleton('WaitlistRepository', () => new PrismaWaitlistRepository());
+   371→
+   372→  // M3: Authorization engine
+   373→  c.singleton('RbacEngine', () => new RbacEngine());
+   374→  c.singleton('AbacEngine', () => new AbacEngine());
+   375→  c.singleton('PolicyEngine', (c) => new PolicyEngine(
+   376→    c.resolve('RbacEngine'), c.resolve('AbacEngine'),
+   377→  ));
+   378→  c.singleton('RiskEngine', () => new RiskEngine());
+   379→  c.singleton('TokenStore', () => new InMemoryTokenStore());
+   380→  c.singleton('EmailService', () => new ConsoleEmailService());
+   381→  c.singleton('UserReadModelStore', () => new PrismaUserReadModelStore());
+   382→  c.singleton('OrganizationReadModelStore', () => new PrismaOrganizationReadModelStore());
+   383→
+   384→  // M3: Register identity projectors on the projection engine
+   385→  c.singleton(TOKENS.ProjectionEngine, (c) => {
+   386→    const engine = new ProjectionEngine(
+   387→      c.resolve(TOKENS.EventStore),
+   388→      c.resolve(TOKENS.CheckpointStore),
+   389→    );
+   390→    // M1 projectors
+   391→    engine.register(new GameProjector());
+   392→    engine.register(new WalletProjector());
+   393→    engine.register(new LeaderboardProjector());
+   394→    engine.register(new StatisticsProjector());
+   395→    // M3 identity projectors
+   396→    engine.register(new UserProfileProjector());
+   397→    engine.register(new OrganizationProjector());
+   398→    engine.register(new AuditLogProjector());
+   399→    engine.register(new ApiKeyProjector());
+   400→    // Launch projectors
+   401→    engine.register(new BetaCohortProjector());
+   402→    return engine;
+   403→  });
+   404→
+   405→  // ─── Launch & Scale Infrastructure ─────────────────────────────────────────
+   406→  c.singleton('BetaCohortRepository', (c) => new BetaCohortRepositoryImpl(
+   407→    c.resolve(TOKENS.EventStore), c.resolve(TOKENS.SnapshotStore), c.resolve(TOKENS.OutboxRepository),
+   408→  ));
+   409→  c.singleton('FeedbackRepository', () => new PrismaFeedbackRepository());
+   410→  c.singleton('ValidationRunRepository', () => new PrismaValidationRunRepository());
+   411→  c.singleton('ReconciliationRepository', () => new PrismaReconciliationRepository());
+   412→  c.singleton('SessionReplayRepository', () => new PrismaSessionReplayRepository());
+   413→  c.singleton('BugRepository', () => new PrismaBugRepository());
+   414→  c.singleton('PerformanceMetricRepository', () => new PrismaPerformanceMetricRepository());
+   415→  c.singleton('ReconciliationSource', (c) => new PrismaReconciliationSource(c.resolve(TOKENS.EventStore)));
+   416→  c.singleton('BetaCohortReadModelStore', () => new PrismaBetaCohortReadModelStore());
+   417→  c.singleton('ReconciliationService', (c) => new ReconciliationService(c.resolve('ReconciliationSource')));
+   418→  c.singleton('ValidationSuiteRunner', (c) => {
+   419→    const runner = new ValidationSuiteRunner();
+   420→    const suites = createPlatformValidationSuites({
+   421→      eventStore: c.resolve(TOKENS.EventStore),
+   422→      reconciliationService: c.resolve('ReconciliationService'),
+   423→      rateLimiter: c.resolve(TOKENS.RateLimiter),
+   424→      storageProvider: c.resolve(TOKENS.StorageProvider),
+   425→      sessionReplayRepo: c.resolve('SessionReplayRepository'),
+   426→    });
+   427→    for (const suite of suites) runner.registerSuite(suite);
+   428→    return runner;
+   429→  });
+   430→
+   431→  // ─── Backup ────────────────────────────────────────────────────────────────
+   432→  c.singleton(TOKENS.BackupProvider, () => new LocalBackupProvider());
+   433→
+   434→  // ─── Disaster recovery ─────────────────────────────────────────────────────
+   435→  c.singleton(TOKENS.DisasterRecoveryService, (c) => {
+   436→    return new DefaultDisasterRecoveryService(
+   437→      c.resolve(TOKENS.ProjectionEngine),
+   438→      c.resolve(TOKENS.WorkerRegistry),
+   439→      c.resolve(TOKENS.RedisClient),
+   440→    );
+   441→  });
+   442→
+   443→  // ─── Performance ───────────────────────────────────────────────────────────
+   444→  c.singleton(TOKENS.PerformanceMiddleware, () => new DefaultPerformanceMiddleware());
+   445→
+   446→  // ─── Production operations ─────────────────────────────────────────────────
+   447→  c.singleton(TOKENS.GracefulShutdownManager, (c) => {
+   448→    const mgr = new GracefulShutdownManager();
+   449→    // Register default shutdown hooks
+   450→    const registry = c.resolve(TOKENS.WorkerRegistry);
+   451→    mgr.registerHook('workers', async () => { await registry.stopAll(); });
+   452→    mgr.registerHook('prisma', async () => { await prisma.$disconnect(); });
+   453→    return mgr;
+   454→  });
+   455→  c.singleton(TOKENS.ReadinessGate, () => new ReadinessGateImpl());
+   456→  c.singleton(TOKENS.MaintenanceMode, (c) => new MaintenanceModeImpl(c.resolve(TOKENS.RedisClient)));
+   457→
+   458→  // ─── Health checks (basic) ─────────────────────────────────────────────────
+   459→  c.singleton(TOKENS.HealthCheckRegistry, (c) => {
+   460→    const registry = new HealthCheckRegistry();
+   461→    registerDefaultHealthChecks(registry, c.resolve(TOKENS.EventBus), c.resolve(TOKENS.OutboxRepository));
+   462→    return registry;
+   463→  });
+   464→
+   465→  // ─── Extended health checks ────────────────────────────────────────────────
+   466→  c.singleton(TOKENS.ExtendedHealthCheckRegistry, (c) => {
+   467→    const registry = new ExtendedHealthCheckRegistry();
+   468→    registerExtendedHealthChecks(registry, {
+   469→      redis: c.resolve(TOKENS.RedisClient),
+   470→      eventStore: c.resolve(TOKENS.EventStore),
+   471→      eventBus: c.resolve(TOKENS.EventBus),
+   472→      outbox: c.resolve(TOKENS.OutboxRepository),
+   473→      projectionEngine: c.resolve(TOKENS.ProjectionEngine),
+   474→      cache: c.resolve(TOKENS.CacheProvider),
+   475→      rateLimiter: c.resolve(TOKENS.RateLimiter),
+   476→      circuitBreakerRegistry: c.resolve(TOKENS.CircuitBreakerRegistry),
+   477→      workerRegistry: c.resolve(TOKENS.WorkerRegistry),
+   478→      storageProvider: c.resolve(TOKENS.StorageProvider),
+   479→    });
+   480→    return registry;
+   481→  });
+   482→
+   483→  // ─── Command Bus with middleware pipeline ──────────────────────────────────
+   484→  c.singleton(TOKENS.CommandBus, (c) => {
+   485→    const bus = new CommandBus();
+   486→    const metrics = c.resolve(TOKENS.MetricsRecorder);
+   487→    const idempotencyStore = c.resolve(TOKENS.IdempotencyStore);
+   488→    const uowFactory = c.resolve(TOKENS.UnitOfWorkFactory);
+   489→
+   490→    bus.use(new CorrelationMiddleware());
+   491→    bus.use(new LoggingMiddleware());
+   492→    bus.use(new MetricsMiddleware(metrics));
+   493→    bus.use(new IdempotencyMiddleware(idempotencyStore, getConfig().idempotency.ttlSeconds));
+   494→    bus.use(new ValidationMiddleware());
+   495→    bus.use(new AuthorizationMiddleware(() => null));
+   496→    bus.use(new TransactionMiddleware(uowFactory));
+   497→
+   498→    // M1 handlers
+   499→    bus.register(new PublishGameHandler(
+   500→      c.resolve(TOKENS.EventStore),
+   501→      c.resolve(TOKENS.SnapshotStore),
+   502→      c.resolve(TOKENS.OutboxRepository),
+   503→    ));
+   504→
+   505→    // M3: Identity command handlers
+   506→    const userRepo = c.resolve('UserRepository');
+   507→    const orgRepo = c.resolve('OrganizationRepository');
+   508→    const roleRepo = c.resolve('RoleRepository');
+   509→    const permRepo = c.resolve('PermissionRepository');
+   510→    const apiKeyRepo = c.resolve('ApiKeyRepository');
+   511→    const auditRepo = c.resolve('AuditLogRepository');
+   512→    const deviceRepo = c.resolve('DeviceRepository');
+   513→    const waitlistRepo = c.resolve('WaitlistRepository');
+   514→    const passwordHasher = c.resolve('PasswordHasher');
+   515→    const sessionStore = c.resolve(TOKENS.SessionStore);
+   516→    const jwtService = c.resolve(TOKENS.JwtService);
+   517→    const rbacEngine = c.resolve('RbacEngine');
+   518→    const riskEngine = c.resolve('RiskEngine');
+   519→    const tokenStore = c.resolve('TokenStore');
+   520→    const emailService = c.resolve('EmailService');
+   521→    const userReadModelStore = c.resolve('UserReadModelStore');
+   522→    const orgReadModelStore = c.resolve('OrganizationReadModelStore');
+   523→
+   524→    // Auth commands
+   525→    bus.register(new RegisterUserHandler(userRepo, waitlistRepo, passwordHasher, null, emailService, tokenStore));
+   526→    bus.register(new VerifyEmailHandler(userRepo, waitlistRepo, tokenStore));
+   527→    bus.register(new LoginHandler(userRepo, passwordHasher, sessionStore, jwtService, deviceRepo, riskEngine, null, null, null));
+   528→    bus.register(new LogoutHandler(sessionStore, null));
+   529→    bus.register(new RefreshSessionHandler(sessionStore, jwtService, null));
+   530→    bus.register(new ChangePasswordHandler(userRepo, passwordHasher, null, null));
+   531→    bus.register(new RequestPasswordResetHandler(userRepo, tokenStore, emailService));
+   532→    bus.register(new ResetPasswordHandler(userRepo, waitlistRepo, passwordHasher, tokenStore));
+   533→
+   534→    // Waitlist commands
+   535→    bus.register(new ApproveUserHandler(userRepo, null));
+   536→    bus.register(new RejectUserHandler(userRepo, null));
+   537→    bus.register(new SubmitForApprovalHandler(userRepo));
+   538→
+   539→    // User management commands
+   540→    bus.register(new SuspendUserHandler(userRepo, null));
+   541→    bus.register(new ReactivateUserHandler(userRepo, null));
+   542→    bus.register(new DeleteUserHandler(userRepo, null));
+   543→    bus.register(new UpdateProfileHandler(userRepo));
+   544→    bus.register(new ChangeEmailHandler(userRepo, null));
+   545→    bus.register(new EnableMfaHandler(userRepo, null));
+   546→    bus.register(new DisableMfaHandler(userRepo, null));
+   547→    bus.register(new AssignRoleHandler(userRepo, null));
+   548→    bus.register(new RemoveRoleHandler(userRepo, null));
+   549→
+   550→    // Organization commands
+   551→    bus.register(new CreateOrganizationHandler(orgRepo));
+   552→    bus.register(new AddMemberHandler(orgRepo, userRepo, null));
+   553→    bus.register(new RemoveMemberHandler(orgRepo, userRepo, null));
+   554→    bus.register(new JoinOrganizationHandler(userRepo));
+   555→
+   556→    // API key commands
+   557→    bus.register(new CreateApiKeyHandler(apiKeyRepo, { generate: () => { const k = generateApiKey(); return { plaintext: k.plaintext, hash: k.hash, prefix: k.prefix }; } }));
+   558→    bus.register(new RotateApiKeyHandler(apiKeyRepo, { generate: () => { const k = generateApiKey(); return { plaintext: k.plaintext, hash: k.hash, prefix: k.prefix }; } }));
+   559→    bus.register(new DisableApiKeyHandler(apiKeyRepo));
+   560→
+   561→    // Role and permission commands
+   562→    bus.register(new CreateRoleHandler(roleRepo));
+   563→    bus.register(new UpdateRoleHandler(roleRepo));
+   564→    bus.register(new DeleteRoleHandler(roleRepo));
+   565→    bus.register(new CreatePermissionHandler(permRepo));
+   566→    bus.register(new DeletePermissionHandler(permRepo));
+   567→
+   568→    // Launch & Scale: Beta cohort commands
+   569→    const cohortRepo = c.resolve('BetaCohortRepository');
+   570→    const feedbackRepo = c.resolve('FeedbackRepository');
+   571→    const validationRunRepo = c.resolve('ValidationRunRepository');
+   572→    const reconciliationRepo = c.resolve('ReconciliationRepository');
+   573→    const bugRepo = c.resolve('BugRepository');
+   574→    const perfRepo = c.resolve('PerformanceMetricRepository');
+   575→    const replayRepo = c.resolve('SessionReplayRepository');
+   576→    const reconciliationService = c.resolve('ReconciliationService');
+   577→    const validationRunner = c.resolve('ValidationSuiteRunner');
+   578→
+   579→    bus.register(new CreateCohortHandler(cohortRepo));
+   580→    bus.register(new InviteParticipantHandler(cohortRepo, null));
+   581→    bus.register(new AcceptInvitationHandler(cohortRepo, async (invId: string) => {
+   582→      return c.resolve('BetaCohortReadModelStore').getCohortIdByInvitation(invId);
+   583→    }));
+   584→    bus.register(new RevokeInvitationHandler(cohortRepo));
+   585→
+   586→    bus.register(new SubmitFeedbackHandler(feedbackRepo));
+   587→    bus.register(new TriageFeedbackHandler(feedbackRepo));
+   588→
+   589→    bus.register(new StartValidationRunHandler(validationRunRepo, validationRunner));
+   590→    bus.register(new CompleteValidationRunHandler(validationRunRepo));
+   591→
+   592→    bus.register(new RunReconciliationHandler(reconciliationRepo, reconciliationService));
+   593→
+   594→    bus.register(new ReportBugHandler(bugRepo));
+   595→    bus.register(new ResolveBugHandler(bugRepo));
+   596→    bus.register(new AssignBugHandler(bugRepo));
+   597→
+   598→    bus.register(new RecordMetricHandler(perfRepo));
+   599→    bus.register(new RecordSessionHandler(replayRepo));
+   600→
+   601→    return bus;
+   602→  });
+   603→
+   604→  // ─── Query Bus with middleware pipeline ────────────────────────────────────
+   605→  c.singleton(TOKENS.QueryBus, (c) => {
+   606→    const bus = new QueryBus();
+   607→    const metrics = c.resolve(TOKENS.MetricsRecorder);
+   608→    const cache = c.resolve(TOKENS.Cache);
+   609→
+   610→    bus.use(new QueryLoggingMiddleware());
+   611→    bus.use(new QueryMetricsMiddleware(metrics));
+   612→    bus.use(new QueryCacheMiddleware(cache, getConfig().cache.ttlSeconds));
+   613→
+   614→    // M1 handlers
+   615→    bus.register(new GetGameHandler(c.resolve(TOKENS.GameReadModelStore)));
+   616→
+   617→    // M3: Identity query handlers
+   618→    bus.register(new GetUserHandler(c.resolve('UserReadModelStore')));
+   619→    bus.register(new ListUsersHandler(c.resolve('UserReadModelStore')));
+   620→    bus.register(new GetCurrentUserHandler(c.resolve('UserReadModelStore')));
+   621→    bus.register(new GetUserPermissionsHandler(c.resolve('UserRepository'), c.resolve('RbacEngine')));
+   622→
+   623→    bus.register(new ListWaitlistHandler(c.resolve('WaitlistRepository')));
+   624→    bus.register(new GetWaitlistStatsHandler(c.resolve('WaitlistRepository')));
+   625→
+   626→    bus.register(new GetOrganizationHandler(c.resolve('OrganizationReadModelStore')));
+   627→    bus.register(new ListOrganizationsHandler(c.resolve('OrganizationReadModelStore')));
+   628→    bus.register(new GetOrganizationMembersHandler(c.resolve('OrganizationReadModelStore')));
+   629→
+   630→    bus.register(new ListAuditLogHandler(c.resolve('AuditLogRepository')));
+   631→    bus.register(new GetAuditEntryHandler(c.resolve('AuditLogRepository')));
+   632→
+   633→    bus.register(new ListApiKeysHandler(c.resolve('ApiKeyRepository')));
+   634→    bus.register(new GetApiKeyHandler(c.resolve('ApiKeyRepository')));
+   635→
+   636→    bus.register(new ListRolesHandler(c.resolve('RoleRepository')));
+   637→    bus.register(new ListPermissionsHandler(c.resolve('PermissionRepository')));
+   638→
+   639→    // Launch & Scale: Query handlers
+   640→    const cohortReadModelStore = c.resolve('BetaCohortReadModelStore');
+   641→    bus.register(new GetCohortHandler(c.resolve('BetaCohortRepository'), cohortReadModelStore));
+   642→    bus.register(new ListCohortsHandler(cohortReadModelStore));
+   643→    bus.register(new GetCohortParticipantsHandler(c.resolve('BetaCohortRepository')));
+   644→
+   645→    bus.register(new ListFeedbackHandler(c.resolve('FeedbackRepository')));
+   646→    bus.register(new GetFeedbackStatsHandler(c.resolve('FeedbackRepository')));
+   647→
+   648→    bus.register(new GetValidationRunHandler(c.resolve('ValidationRunRepository')));
+   649→    bus.register(new ListValidationRunsHandler(c.resolve('ValidationRunRepository')));
+   650→    bus.register(new GetLatestValidationHandler(c.resolve('ValidationRunRepository')));
+   651→
+   652→    bus.register(new GetReconciliationHandler(c.resolve('ReconciliationRepository')));
+   653→    bus.register(new ListReconciliationsHandler(c.resolve('ReconciliationRepository')));
+   654→    bus.register(new GetLatestReconciliationHandler(c.resolve('ReconciliationRepository')));
+   655→
+   656→    bus.register(new ListBugsHandler(c.resolve('BugRepository')));
+   657→    bus.register(new GetBugStatsHandler(c.resolve('BugRepository')));
+   658→
+   659→    bus.register(new GetPerformanceSummaryHandler(c.resolve('PerformanceMetricRepository')));
+   660→    bus.register(new ListMetricsHandler(c.resolve('PerformanceMetricRepository')));
+   661→
+   662→    bus.register(new ListSessionReplaysHandler(c.resolve('SessionReplayRepository')));
+   663→
+   664→    return bus;
+   665→  });
+   666→
+   667→  // ─── Register validators and policies ──────────────────────────────────────
+   668→  registerCommandValidator('PublishGame', new ZodValidator(PublishGameSchema));
+   669→  registerPolicy('PublishGame', new AllowAnyonePolicy());
+   670→
+   671→  // M3: Register identity validators
+   672→  for (const [commandType, schema] of IDENTITY_COMMAND_SCHEMAS) {
+   673→    registerCommandValidator(commandType, new ZodValidator(schema));
+   674→    registerPolicy(commandType, new AllowAnyonePolicy()); // Will tighten with real auth
+   675→  }
+   676→  for (const [queryType, schema] of IDENTITY_QUERY_SCHEMAS) {
+   677→    registerCommandValidator(queryType, new ZodValidator(schema));
+   678→  }
+   679→
+   680→  // Launch & Scale: Register validators
+   681→  for (const [commandType, schema] of LAUNCH_COMMAND_SCHEMAS) {
+   682→    registerCommandValidator(commandType, new ZodValidator(schema));
+   683→    registerPolicy(commandType, new AllowAnyonePolicy());
+   684→  }
+   685→  for (const [queryType, schema] of LAUNCH_QUERY_SCHEMAS) {
+   686→    registerCommandValidator(queryType, new ZodValidator(schema));
+   687→  }
+   688→
+   689→  container = c;
+   690→  globalForContainer.__playliquidContainer = c;
+   691→  globalForContainer.__playliquidContainerBuilding = undefined;
+   692→
+   693→  logger.system().info('Composition root initialized (M2)', {
+   694→    redisBackend: redisClient.backend,
+   695→    commandTypes: c.resolve(TOKENS.CommandBus).getCommandTypes(),
+   696→    queryTypes: c.resolve(TOKENS.QueryBus).getQueryTypes(),
+   697→    bindings: c.listBindings().length,
+   698→  });
+   699→
+   700→  return c;
+   701→  })(); // end buildPromise
+   702→
+   703→  globalForContainer.__playliquidContainerBuilding = buildPromise;
+   704→  return buildPromise;
+   705→}
+   706→
+   707→/** Get the singleton container (builds on first call). */
+   708→export async function getContainer(): Promise<DIContainer> {
+   709→  return container ?? buildContainer();
+   710→}
+   711→
+   712→/** Start background workers and scheduler. */
+   713→export async function startWorkers(): Promise<void> {
+   714→  const c = await getContainer();
+   715→  const config = getConfig();
+   716→
+   717→  if (config.featureFlags.outboxWorker || config.featureFlags.projectionWorker) {
+   718→    c.resolve(TOKENS.WorkerRegistry).startAll();
+   719→  }
+   720→
+   721→  c.resolve(TOKENS.Scheduler).start();
+   722→
+   723→  logger.system().info('Background workers and scheduler started');
+   724→}
+   725→
+   726→// Import getEnvVar for storage path
+   727→import { getEnvVar } from '@/shared/config';
+   728→

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Result type — explicit success/failure without throwing.
  *

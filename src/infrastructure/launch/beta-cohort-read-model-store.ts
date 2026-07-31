@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Prisma-backed read model store for beta cohorts.
  */

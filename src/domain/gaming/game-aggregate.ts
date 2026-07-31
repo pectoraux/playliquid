@@ -72,15 +72,15 @@ export class GameAggregate extends AggregateRoot<string> {
   }
 
   /** Event handler — applies GamePublished. */
-  private applyGamePublished(event: DomainEvent<GamePublishedPayload>): void {
-    this._title = event.payload.title;
-    this._creatorId = event.payload.creatorId;
+  private applyGamePublished(event: { payload: Record<string, unknown> }): void {
+    this._title = String(event.payload.title);
+    this._creatorId = String(event.payload.creatorId);
     this._status = 'published';
-    this._publishedAt = event.payload.publishedAt;
+    this._publishedAt = String(event.payload.publishedAt);
   }
 
   /** Event handler — applies GameUnpublished. */
-  private applyGameUnpublished(event: DomainEvent<GameUnpublishedPayload>): void {
+  private applyGameUnpublished(event: { payload: Record<string, unknown> }): void {
     this._status = 'unpublished';
   }
 

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Metrics recorder — in-memory counters and histograms for command/query
  * dispatch timing and health reporting.

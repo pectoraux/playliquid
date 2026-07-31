@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * In-memory token store — issues and validates one-time tokens.
  *

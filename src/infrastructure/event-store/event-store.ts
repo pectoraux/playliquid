@@ -158,7 +158,7 @@ export class PrismaEventStore implements EventStore {
       aggregateVersion: r.aggregateVersion,
       occurredAt: r.occurredAt,
       correlationId: r.correlationId ?? '',
-      causationId: r.causationId,
+      causationId: r.causationId ?? undefined,
       metadata: JSON.parse(r.metadata),
       payload: JSON.parse(r.payload),
     };

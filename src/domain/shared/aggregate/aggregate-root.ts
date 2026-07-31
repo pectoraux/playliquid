@@ -12,7 +12,7 @@
  *   4. Events are written to the Outbox within the same transaction.
  */
 
-import { DomainEvent, type DomainEventMetadata, type DomainEventPayload } from '@/domain/shared/event/domain-event';
+import { DomainEvent, type DomainEventMetadata, type AnyPayload } from '@/domain/shared/event/domain-event';
 import { ConcurrencyError } from '@/domain/shared/errors';
 
 export interface AggregateSnapshot {
@@ -56,7 +56,7 @@ export abstract class AggregateRoot<TId = string> {
   }
 
   /** Raise a domain event and apply it to the current state. */
-  protected raiseEvent<TPayload extends DomainEventPayload>(
+  protected raiseEvent<TPayload extends AnyPayload>(
     eventType: new (params: {
       aggregateId: string;
       aggregateType: string;

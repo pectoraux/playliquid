@@ -13,6 +13,10 @@ export interface DomainEventPayload {
   readonly [key: string]: unknown;
 }
 
+// Use a looser type for the constraint so concrete payload interfaces
+// (which have specific readonly fields) are accepted.
+export type AnyPayload = object;
+
 export interface DomainEventMetadata {
   readonly correlationId?: string;
   readonly causationId?: string;
@@ -21,14 +25,14 @@ export interface DomainEventMetadata {
   readonly [key: string]: unknown;
 }
 
-export abstract class DomainEvent<TPayload extends DomainEventPayload = DomainEventPayload> {
+export abstract class DomainEvent<TPayload extends AnyPayload = AnyPayload> {
   readonly id: string;
   readonly aggregateId: string;
   readonly aggregateType: string;
   readonly aggregateVersion: number;
   readonly occurredAt: string;
   readonly correlationId: string;
-  readonly causationId: string | null;
+  readonly causationId: string | undefined;
   readonly metadata: DomainEventMetadata;
   readonly payload: TPayload;
 
@@ -49,7 +53,7 @@ export abstract class DomainEvent<TPayload extends DomainEventPayload = DomainEv
     this.aggregateVersion = params.aggregateVersion;
     this.occurredAt = params.occurredAt ?? new Date().toISOString();
     this.correlationId = params.correlationId ?? params.metadata?.correlationId ?? '';
-    this.causationId = params.causationId ?? params.metadata?.causationId ?? null;
+    this.causationId = params.causationId ?? params.metadata?.causationId ?? undefined;
     this.metadata = {
       ...params.metadata,
       correlationId: this.correlationId,
@@ -93,7 +97,7 @@ export interface SerializedEvent {
   readonly aggregateVersion: number;
   readonly occurredAt: string;
   readonly correlationId: string;
-  readonly causationId: string | null;
+  readonly causationId: string | undefined;
   readonly metadata: Metadata;
   readonly payload: Metadata;
 }

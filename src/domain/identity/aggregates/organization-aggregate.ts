@@ -107,25 +107,25 @@ export class OrganizationAggregate extends AggregateRoot<string> {
     return member?.roleId ?? null;
   }
 
-  private applyOrganizationCreated(event: { payload: OrganizationCreatedPayload }): void {
-    this._name = event.payload.name;
-    this._slug = event.payload.slug;
-    this._type = event.payload.type as OrganizationType;
-    this._createdById = event.payload.createdById;
+  private applyOrganizationCreated(event: { payload: Record<string, unknown> }): void {
+    this._name = String(event.payload.name);
+    this._slug = String(event.payload.slug);
+    this._type = String(event.payload.type) as OrganizationType;
+    this._createdById = String(event.payload.createdById);
   }
 
-  private applyMemberAdded(event: { payload: MemberAddedPayload }): void {
+  private applyMemberAdded(event: { payload: Record<string, unknown> }): void {
     this._members = [...this._members, {
-      userId: event.payload.userId,
-      roleId: event.payload.roleId,
-      joinedAt: event.payload.addedAt,
+      userId: String(event.payload.userId),
+      roleId: String(event.payload.roleId),
+      joinedAt: String(event.payload.addedAt),
       status: 'active',
     }];
   }
 
-  private applyMemberRemoved(event: { payload: MemberRemovedPayload }): void {
+  private applyMemberRemoved(event: { payload: Record<string, unknown> }): void {
     this._members = this._members.map((m) =>
-      m.userId === event.payload.userId ? { ...m, status: 'removed' as const } : m,
+      m.userId === String(event.payload.userId) ? { ...m, status: 'removed' as const } : m,
     );
   }
 

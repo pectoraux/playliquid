@@ -55,6 +55,8 @@ export const TOKENS = {
 
   // M2: Operations
   MetricsFramework: 'MetricsFramework',
+  MetricsRecorder: 'MetricsRecorder',
+  Cache: 'Cache',
   ExtendedHealthCheckRegistry: 'ExtendedHealthCheckRegistry',
   BackupProvider: 'BackupProvider',
   DisasterRecoveryService: 'DisasterRecoveryService',

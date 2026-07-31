@@ -1,0 +1,402 @@
+   200→Work Log:
+   201→- Read worklog.md to inherit the Milestone 1 architecture (DDD/CQRS/Event Sourcing, strict layer boundaries, architecture enforcement via scripts/check-architecture.ts).
+   202→- Inspected existing infrastructure patterns (cache-provider.ts, redis-client.ts, lock-provider.ts) to match conventions: provider-interface + in-memory + production-backend pairs, dynamic imports for optional deps, `logger` / `getConfig` from shared, no `process.env`, no `any`.
+   203→- Created `src/infrastructure/storage/storage-provider.ts` (615 lines): `StorageObject` / `UploadOptions` / `StorageProvider` interfaces exactly as specified; `LocalStorageProvider` (filesystem-backed, sidecar `.meta.json` files, MD5 etags, HMAC-SHA256 signed URLs with constant-time verification and a public `verifySignedUrl` helper for serving endpoints, path-traversal guards, recursive `list` with prefix filtering); `S3StorageProvider` (lazy `await import('@aws-sdk/client-s3')` + `@aws-sdk/s3-request-presigner` with clear "install this package" error if missing, minimal local type shapes so no `any`/`unknown` casting at call sites, supports S3-compatible APIs via `endpoint` + `forcePathStyle`, GetObject Body via `transformToByteArray`, HeadObject 404→null, ListObjectsV2).
+   204→- Created `src/infrastructure/cdn/cdn-provider.ts` (237 lines): `CdnProvider` interface exactly as specified; `LocalCdnProvider` (deterministic SHA-1 version hash appended as `?v=…`, HMAC-SHA256 signed URLs with version+expires, no-op invalidate/purgeAll logged at debug); `CloudflareCdnProvider` (constructs `${baseUrl}/${key}?v=…` URLs, HMAC-signed URLs, calls Cloudflare REST API `POST /zones/{zoneId}/purge_cache` with 30-file batching for `invalidate`, `{purge_everything: true}` for `purgeAll`, validates `success` flag and surfaces API errors).
+   205→- Created `src/infrastructure/search/search-provider.ts` (493 lines): `SearchDocument` / `SearchResult` / `SearchQuery` / `Indexer` / `SearchProvider` interfaces exactly as specified; `InMemorySearchProvider` with per-index inverted index (token → Map<docId, term frequency>), tokenisation (lowercase + non-alphanumeric split), TF-based scoring, filter operators ($eq/$ne/$gt/$gte/$lt/$lte/$in/$nin/$exists plus equality shorthand, array-membership semantics), sort (numeric vs lexical vs date with asc/desc), offset/limit pagination, faceting over the filtered candidate set, and HTML-escaped `<mark>` highlights capped at 3 snippets per field. `update()` removes old tokens before re-indexing so stale terms don't leak; `delete()` cleans postings and prunes empty token entries.
+   206→- Verified with a Bun smoke test: full-text search returns ranked results; filters with $in+$lte+facets work; count returns the right number; update re-indexes (search "deluxe" finds the renamed doc); delete removes the doc (search "galactic" returns empty); LocalStorageProvider upload/download/stat/exists/signedUrl/verifySignedUrl/move/list/delete all work end-to-end; LocalCdnProvider getUrl/getVersion/getSignedUrl/invalidate/purgeAll all work.
+   207→- Ran final checks: `bun run lint` → 0 errors. `bun run scripts/check-architecture.ts` → ✅ 0 violations across 163 files. TypeScript: my three files produce zero type errors (pre-existing errors in other agents' files e.g. scheduler/scheduler.ts, application/buses/*.ts are out of scope).
+   208→
+   209→Stage Summary:
+   210→- Three new infrastructure modules created exactly at the requested paths (storage/storage-provider.ts, cdn/cdn-provider.ts, search/search-provider.ts) — 1345 lines total, all production-quality with proper error handling and JSDoc.
+   211→- StorageProvider abstraction supports LocalStorageProvider (development / single-instance, HMAC-signed URLs) and S3StorageProvider (production, AWS SDK v3 dynamic import, S3-compatible APIs).
+   212→- CdnProvider abstraction supports LocalCdnProvider (development) and CloudflareCdnProvider (production with real Cloudflare purge API).
+   213→- SearchProvider abstraction provides a working InMemorySearchProvider (inverted index, TF scoring, filter operators, sorting, pagination, faceting, highlights) suitable for the demo; real backends (Meilisearch/Elasticsearch/Typesense) can be added later by implementing the same interface.
+   214→- All architecture rules respected: `import type` for type-only imports, no `any`, no `process.env` (uses `getConfig().auth.secret` for HMAC defaults), no Prisma, infrastructure-only imports of shared/domain/application.
+   215→- Functional smoke test passes end-to-end across all three modules.
+   216→
+   217→---
+   218→Task ID: M2-3a
+   219→Agent: general-purpose
+   220→Task: Build worker framework + scheduler
+   221→
+   222→Work Log:
+   223→- Read worklog.md to understand Milestone 1 architecture: clean DDD/CQRS/Event-Sourcing layers, DI container, OutboxPublisher/ProjectionEngine already running fire-and-forget loops, LockProvider interface exists in infrastructure/locking.
+   224→- Created `/home/z/my-project/src/infrastructure/workers/worker-framework.ts`:
+   225→  - `Worker` interface (name, pollIntervalMs, start/stop/isRunning/getHealth/processOnce)
+   226→  - `WorkerHealth` snapshot interface (running, lastRunAt, lastError, totalProcessed, totalErrors, avgDurationMs)
+   227→  - `WorkerLifecycle` interface (registerShutdownHook + shutdown)
+   228→  - `WorkerMetrics` class — per-worker counters (runs, successes, failures, totalProcessed, totalDurationMs, lastRunAt, lastError) with register/recordRun/snapshot/reset
+   229→  - `BaseWorker` abstract class — implements the polling loop with: configurable poll interval (absolute end-of-cycle bound so a slow batch doesn't drift the schedule), concurrency cap (max concurrent `processBatch` calls in flight tracked via `activeBatches` set), per-batch try/catch that records metrics without crashing the loop, graceful `stop()` that flips `running=false` and awaits all in-flight batches before resolving. Subclasses only implement `defaultPollIntervalMs()` and `processBatch()`.
+   230→  - `WorkerRegistry` — owns all workers in the process, provides `register/get/startAll/stopAll/getHealth/list`, implements `WorkerLifecycle` (stops workers then runs registered shutdown hooks in registration order).
+   231→- Created `/home/z/my-project/src/infrastructure/workers/workers.ts`:
+   232→  - `OutboxWorker` wraps `OutboxPublisher.processBatch` (default poll interval from `getConfig().outbox.pollIntervalMs`).
+   233→  - `ProjectionWorker` wraps `ProjectionEngine.processBatch` (default poll interval from `getConfig().projections.pollIntervalMs`).
+   234→  - `CleanupWorker` purges (a) expired idempotency records via `IdempotencyStore.purgeExpired` (best-effort, type-guarded via `typeof === 'function'`), (b) published outbox messages older than `publishedOutboxRetentionMs` (default 7d), (c) failed outbox messages older than `failedOutboxRetentionMs` (default 30d). Default poll 5 min (non-urgent). Uses `getClient()` directly — allowed since we're inside infrastructure.
+   235→  - `AnalyticsWorker` placeholder: polls the event store from a `lastRowId` checkpoint, counts events by type into an in-memory `Map<string, number>`, exposes `getEventCounts()` and `getTotalEvents()` for future /api/workers/analytics. Default poll 30s.
+   236→  - `WORKER_TOKENS` const object with string tokens for the DI container (WorkerRegistry + each worker).
+   237→- Created `/home/z/my-project/src/infrastructure/scheduler/scheduled-job-model.ts`:
+   238→  - `JobScheduleKind` type (`'cron' | 'fixed_rate' | 'one_time'`).
+   239→  - `ScheduledJobRecord` interface — the persisted shape (id, name, scheduleKind, scheduleValue as serialized string, priority, enabled, nextRunAt as epoch ms, lastRunAt, lastError, runCount, errorCount, createdAt, updatedAt). Includes a Prisma schema sketch in the docblock for the main agent to add to schema.prisma.
+   240→  - `JobRunUpdate` patch interface for post-run state updates.
+   241→  - `ScheduledJobStore` port interface (save/load/loadAll/loadDue/updateRunState/delete). `loadDue(now)` returns enabled jobs with `nextRunAt <= now`, sorted by priority desc then nextRunAt asc.
+   242→  - `InMemoryScheduledJobStore` — single-instance implementation with the same priority-sorted `loadDue`.
+   243→- Created `/home/z/my-project/src/infrastructure/scheduler/scheduler.ts`:
+   244→  - `JobSchedule` discriminated union (`cron`/`fixed_rate`/`one_time`), `ScheduledJob` interface, `Scheduler` interface, `SchedulerOptions` (tickIntervalMs default 1s, lockTtlSeconds default 60s, optional store, required lockProvider).
+   245→  - `CronField` — parses one cron field supporting wildcard, single values, ranges (`1-5`), lists (`1,3,5`), and step values (wildcard/15, 1-30/5). Validates bounds per field.
+   246→  - `CronExpression` — parses 5-field cron (min hour dom month dow), implements standard OR semantics when both DoM and DoW are restricted, `matches(date)` and `nextRunAfter(fromMs)` that iterates minute-by-minute up to 4 years (~2.1M iterations cap) to handle leap-day expressions.
+   247→  - `InMemoryScheduler` — tick-loop implementation using absolute timestamps (clock-drift safe: every decision compares `Date.now()` against persisted `nextRunAt`), priority-ordered dispatch (defensive re-sort on top of `loadDue`), distributed-lock coordination via `lockProvider.acquire('scheduler:job:<id>', lockTtlSeconds)` — skips the tick if another instance holds the lock, persists run state (runCount, errorCount, lastRunAt, nextRunAt) to the `ScheduledJobStore`, removes one-time jobs after execution, graceful `stop()` that awaits in-flight handler runs.
+   248→  - `SCHEDULER_TOKENS` const object (Scheduler, ScheduledJobStore).
+   249→- Verification:
+   250→  - `bun run lint` → 0 errors (initially had a parsing error from a `*/15` substring in a JSDoc comment that closed the comment block early; rewrote the docstring to avoid the sequence).
+   251→  - `bun run scripts/check-architecture.ts` → 0 violations (163 files scanned). All imports respect layer boundaries: scheduler/workers only import from infrastructure + shared + application ports; no `process.env` outside `shared/config`; no `any` in domain/shared.
+   252→  - `bunx tsc --noEmit --skipLibCheck` → no errors in any of the 4 new files (pre-existing errors in storage-provider, telemetry/metrics, interfaces, shared/types/result are unrelated and out of scope).
+   253→  - Fixed a TS2715 issue: removed `this.metrics.register(this.name)` from the `BaseWorker` constructor since `name` is an abstract property set by the subclass and not yet available at base-constructor time. Metrics auto-register on first `recordRun`/`snapshot` via `getOrCreate`.
+   254→
+   255→Stage Summary:
+   256→- 4 new files created (~47 KB total): `worker-framework.ts`, `workers.ts`, `scheduler.ts`, `scheduled-job-model.ts`.
+   257→- Worker framework provides a `BaseWorker` abstraction with health metrics, concurrency, graceful shutdown, and a `WorkerRegistry` lifecycle manager — existing `OutboxPublisher`/`ProjectionEngine` are wrapped as thin adapters so their existing `processBatch` methods become observable, controllable workers.
+   258→- 4 concrete workers implemented: `OutboxWorker`, `ProjectionWorker`, `CleanupWorker` (idempotency + outbox retention purge), `AnalyticsWorker` (event-count placeholder with checkpoint).
+   259→- Scheduler provides `cron` (custom 5-field parser), `fixed_rate`, and `one_time` job kinds with priority-ordered, distributed-lock-coordinated, clock-drift-safe execution and a pluggable persistence port (`ScheduledJobStore`) backed by an in-memory implementation.
+   260→- All architecture + lint checks pass clean. No `process.env` outside shared/config, no Prisma outside infrastructure, no `any` types, no ES2015 namespaces, `import type` used for all type-only imports.
+   261→- NEXT (for main agent): (1) Add the `ScheduledJob` Prisma model to `prisma/schema.prisma` (schema sketch in `scheduled-job-model.ts` docblock), then implement `PrismaScheduledJobStore`. (2) Wire `WORKER_TOKENS` and `SCHEDULER_TOKENS` into `composition-root.ts`: replace the existing fire-and-forget `startWorkers()` with `WorkerRegistry.startAll()`, register the four workers, and bind the scheduler. (3) Wire `WorkerRegistry.shutdown()` to SIGTERM/SIGINT handlers. (4) Optionally extend the `/api/workers` endpoints to surface `WorkerRegistry.getHealth()` and `Scheduler.listJobs()`.
+   262→
+   263→---
+   264→Task ID: M2-3b
+   265→Agent: general-purpose
+   266→Task: Build message queue abstraction + dead letter queue
+   267→
+   268→Work Log:
+   269→- Read worklog.md to understand the M1 architecture (DDD/CQRS/Event Sourcing/Outbox, clean architecture with shared→domain→application→infrastructure→interfaces layers, interface-driven infrastructure, architecture checker enforcing no Prisma outside infra / no process.env outside shared/config).
+   270→- Inspected existing infrastructure patterns: `RedisClient` interface (in-memory + ioredis backends), `getClient()` from `@/infrastructure/database/prisma`, `withRetry` framework (exponential-jitter backoff), structured `logger` with scoped loggers (worker/event/system), `createId()` from `@/shared/ids`, `sleep`/`safeJsonParse` from `@/shared/utils`. Reviewed `OutboxPublisher` and `ProjectionEngine` as worker-pattern references.
+   271→- Added `DeadLetterMessage` Prisma model to `prisma/schema.prisma` with BigInt columns for timestamps (firstFailedAt, lastFailedAt, expiresAt) — SQLite Int is 32-bit and overflows on Unix-ms timestamps. Ran `bun run db:generate` + `bun run db:push` to sync schema and regenerate the client.
+   272→- Created `src/infrastructure/queue/message-queue.ts`:
+   273→  - Exported the exact interfaces from the spec: `QueueMessage<T>`, `MessageConsumer<T>`, `MessageQueue`, `PublishOptions`, `NackOptions`.
+   274→  - Exported constants: `PRIORITY_HEADER` ('x-priority'), `ERROR_HISTORY_HEADER` ('x-error-history'), `MAX_ATTEMPTS_DEFAULT` (5), `VISIBILITY_TIMEOUT_MS` (30s), `POLL_INTERVAL_MS` (100ms).
+   275→  - `InMemoryQueue`: per-queue arrays sorted by priority (desc) then createdAt (asc); delayed delivery via `availableAt` checked by a setTimeout-based polling loop; visibility-timeout re-queue for stuck in-flight messages; auto-nack on consumer throw. `nack(requeue=true)` increments attempts and re-queues with optional delay; `retry()` is shorthand for immediate nack; `delay()` re-queues without incrementing; `stop()` clears timers.
+   276→  - `RedisQueue`: uses the `RedisClient` abstraction (works with both real Redis and `InMemoryRedisClient` fallback). Simulates sorted sets (priority) and lists (FIFO) using JSON-encoded data structures keyed `queue:{name}:messages` (metadata array), `queue:{name}:msg:{id}` (full message), `queue:{name}:inflight` (in-flight map). Same dispatch/visibility-timeout semantics as InMemoryQueue.
+   277→- Created `src/infrastructure/queue/dead-letter-queue.ts`:
+   278→  - Exported the exact interfaces from the spec: `DeadLetterMessage`, `DlqErrorEntry`, `DeadLetterQueue`.
+   279→  - Defined a `DeadLetterMessageRecord` interface (with BigInt timestamp fields) mirroring the Prisma model, so the module is self-documenting and decoupled from Prisma codegen.
+   280→  - `PrismaDeadLetterQueue`: persists via `getClient().deadLetterMessage.*`. `send()` generates a `dlq_`-prefixed ID and sets firstFailedAt/lastFailedAt to now, status='pending'. `get()`/`list()` deserialize payload/headers/errorHistory from JSON. `replay()` publishes the payload back to the original queue and marks status='replayed'. `replayAll()` replays all pending entries for a given queue. `expire()` marks entries with `expiresAt < now` as 'expired' (audit trail preserved). `count()` returns pending count.
+   281→  - `isPoison(message)`: returns true iff `attempts >= maxAttempts` AND the same error string appears 3+ times in the `x-error-history` header (parsed as `DlqErrorEntry[]`). Exports `POISON_REPEAT_THRESHOLD = 3` and `DEFAULT_DLQ_TTL_MS = 7 days`.
+   282→- Created `src/infrastructure/queue/queue-worker.ts`:
+   283→  - `QueueWorker` accepts a `MessageQueue`, a `DeadLetterQueue`, and options (concurrency, maxRetries, baseDelayMs, maxDelayMs, shutdownTimeoutMs).
+   284→  - `register<T>(queue, handler)` collects handler registrations before `start()`.
+   285→  - `start()` calls `mq.consume()` for each registration with a wrapped handler.
+   286→  - Wrapped handler: checks `running` flag (nacks with delay if stopping), restores per-message error history from an in-memory Map, acquires a concurrency slot (simple semaphore via activeCount + sleep), then calls `processMessage`.
+   287→  - `processMessage`: wraps the handler call in `withRetry()` (short-term transient retries within one delivery). On success → `ack` + clear error history. On failure → `handleFailure`.
+   288→  - `handleFailure`: appends a `DlqErrorEntry` to the in-memory error history Map and syncs it to `message.headers[x-error-history]`. Computes `nextAttempts = attempts + 1`. If `nextAttempts >= maxAttempts` OR `dlq.isPoison(message)` → `sendToDlq` + `ack` (removes from queue). Otherwise → `nack` with exponential backoff (`baseDelayMs * 2^attempts`, capped at `maxDelayMs`).
+   289→  - `sendToDlq`: calls `dlq.send()` with the original payload, headers, full error history, attempts, and a 7-day expiry.
+   290→  - `stop()`: sets `running = false`, then waits up to `shutdownTimeoutMs` for in-flight messages to drain (graceful shutdown). Logs a warning if any remain.
+   291→- Added the three queue modules to `src/infrastructure/index.ts` barrel export.
+   292→- Fixed a TypeScript error in `InMemoryQueue.checkVisibilityTimeouts` (used `inflight` instead of `inflightMap` in a for-of destructuring).
+   293→- Fixed a runtime error: changed `Int` → `BigInt` for DLQ timestamp columns in the Prisma schema (SQLite Int is 32-bit; Unix-ms timestamps overflow). Updated `PrismaDeadLetterQueue` to wrap writes with `BigInt(...)` and reads with `Number(...)`.
+   294→- Ran smoke tests verifying: (1) InMemoryQueue + Worker processes a success message and routes a failing message to the DLQ after exactly `maxAttempts` deliveries; (2) RedisQueue processes messages with priority ordering; (3) DLQ `replay()` re-publishes and marks status='replayed'; (4) DLQ `expire()` marks expired entries; (5) `isPoison()` correctly identifies poison (3+ same errors + maxAttempts) and rejects non-poison (different errors, or attempts < max).
+   295→- Verified: `bun run lint` — 0 errors. `bun run scripts/check-architecture.ts` — 0 violations (166 files scanned). `bunx tsc --noEmit --skipLibCheck` — 0 errors in queue files (pre-existing errors in other modules unchanged).
+   296→
+   297→Stage Summary:
+   298→- Three new files created in `src/infrastructure/queue/`: `message-queue.ts` (InMemoryQueue + RedisQueue, ~630 lines), `dead-letter-queue.ts` (PrismaDeadLetterQueue + isPoison, ~285 lines), `queue-worker.ts` (QueueWorker with concurrency + graceful shutdown, ~260 lines).
+   299→- Prisma schema extended with `DeadLetterMessage` model (BigInt timestamps, 3 indexes).
+   300→- Full retry lifecycle implemented: short-term `withRetry` within a delivery → exponential-backoff `nack` across deliveries → DLQ routing when `maxAttempts` exhausted or poison detected.
+   301→- All architecture rules respected: no `process.env` outside shared/config, no Prisma imports outside infrastructure, `import type` used for type-only imports, no `any` types, no ES2015 namespaces.
+   302→- Lint passes (0 errors), architecture checker passes (0 violations, 166 files), TypeScript passes (0 errors in queue files).
+   303→- Smoke-tested end-to-end: publish → consume → process → ack/nack → retry with backoff → DLQ routing → replay → expire → poison detection.
+   304→
+   305→---
+   306→Task ID: M2-7
+   307→Agent: general-purpose
+   308→Task: Build metrics framework + extended health monitoring + production operations
+   309→
+   310→Work Log:
+   311→- Read worklog.md to inherit the architecture context: M1 (DDD/CQRS/Event Sourcing/Outbox, strict layer boundaries via scripts/check-architecture.ts) and M2-3/4/5 deliverables (workers, scheduler, queue + DLQ, storage/CDN/search, feature flags/secrets/config service). Confirmed the patterns to match: provider-interface + in-memory default, `import type` for type-only imports, `getEnvVar()` from `@/shared/config`, `getClient()` from `@/infrastructure/database/prisma`, no `process.env` outside shared/config (the checker matches the literal string even in comments), no `any`, no ES2015 namespaces.
+   312→- Inspected the existing infrastructure that the new modules must integrate with: `InMemoryMetricsRecorder` (telemetry/metrics.ts — basic command/query counters only), `HealthCheckRegistry` + `registerDefaultHealthChecks` (telemetry/health-checks.ts — only 5 checks: database, event-store, event-bus, outbox, cache), `CircuitBreakerRegistry`, `WorkerRegistry` + `WorkerHealth`, `ProjectionEngine` + `CheckpointStore`, `InMemoryScheduler` + `Scheduler` interface, `StorageProvider` + `LocalStorageProvider`, `MessageQueue.getQueueDepth`, `CacheProvider` + `Cache`, `RateLimiter`, `RedisClient` + `getRedisClient`, `OutboxRepository.countByStatus`.
+   313→- Created `/home/z/my-project/src/infrastructure/metrics/metrics-framework.ts` (~430 lines):
+   314→  - `MetricType` union (`counter | gauge | histogram | timer`), `MetricSample`, `HistogramStats`, `MetricsFramework` interfaces matching the spec exactly.
+   315→  - `STANDARD_METRICS` constant array — pre-registers all 10 standard metrics (`http_requests_total`, `http_request_duration_seconds`, `commands_dispatched_total`, `queries_executed_total`, `worker_processed_total`, `cache_hits_total`, `cache_misses_total`, `db_query_duration_seconds`, `queue_depth`, `circuit_breaker_state`) with HELP text and label name declarations. Also exported as `METRIC_NAMES` for typed references.
+   316→  - `InMemoryMetricsFramework` — counters stored as `Map<name, Map<labelsKey, { value, labels }>>` (same shape for gauges), histograms as `Map<name, Map<labelsKey, { observations: number[], labels, sorted: number[] | null }>>` with lazy re-sort on read. Label key is the sorted `"k1=\"v1\",k2=\"v2\""` serialization so per-context evaluations resolve consistently. Counter increments refuse negative values (logged + ignored). Histogram observations reject NaN/Infinity.
+   317→  - `startTimer()` uses `process.hrtime.bigint()` for nanosecond precision, returns a stop function that records the duration in SECONDS (matching Prometheus conventions) — calling the stop function more than once only records the first call.
+   318→  - `getHistogram()` returns `{ count, sum, avg, min, max, p50, p95, p99 }` — percentiles computed via linear interpolation on the sorted ascending observation array (matches numpy default / `histogram_quantile` semantics for the same input).
+   319→  - `toPrometheus()` emits the standard text exposition format: `# HELP` / `# TYPE` lines from the pre-registered definitions (with timers mapped to `histogram` TYPE), then per-series lines with sorted `{labels}`. For histograms emits `_count`, `_sum`, and an average-value observation line per series. Pre-registered-but-unobserved counters/gauges emit a `0` line so Prometheus always sees the series.
+   320→  - `getAll()` flattens all metrics to a `MetricSample[]` for JSON admin APIs.
+   321→  - `getMetricsFramework()` / `resetMetricsFramework()` singleton accessor (composition root is the typical caller; production code resolves from the DI container).
+   322→- Created `/home/z/my-project/src/infrastructure/telemetry/extended-health-checks.ts` (~445 lines):
+   323→  - `ExtendedHealthCheckResult`, `ExtendedHealthCheck`, `AggregatedHealth`, `ExtendedHealthCheckOptions`, `ExtendedHealthCheckDependencies` interfaces.
+   324→  - 13 check factory functions matching the spec: `createDatabaseHealthCheck` (Prisma `SELECT 1`), `createRedisHealthCheck` (PING, surfaces `backend: 'redis' | 'memory'`), `createEventStoreHealthCheck` (eventRecord.count), `createEventBusHealthCheck` (constructor name + always healthy for in-memory), `createOutboxHealthCheck` (countByStatus, degraded if failed>0), `createProjectionHealthCheck` (checkpoint lag vs latest event, configurable threshold; reads directly from Prisma client because the ProjectionEngine interface doesn't expose checkpoint introspection), `createQueueHealthCheck` (per-queue depth, degraded if any exceeds threshold), `createStorageHealthCheck` (write/read/delete roundtrip with a randomized test key), `createSchedulerHealthCheck` (listJobs, jobCount), `createWorkersHealthCheck` (uses `WorkerRegistry.getHealth()`, unhealthy if any stopped, degraded if any stale beyond idle threshold), `createCircuitBreakersHealthCheck` (any open or half-open → degraded), `createCacheHealthCheck` (set/get/delete roundtrip, duck-typed to work with both `CacheProvider` async and `Cache` sync interfaces), `createRateLimiterHealthCheck` (no-op `check()` call, validates result shape).
+   325→  - `ExtendedHealthCheckRegistry` — runs all checks in parallel via `Promise.allSettled`, each wrapped in a hard `withTimeout` (default 2s) so a slow downstream can't stall the registry; caches the aggregated result for a configurable TTL (default 5s); supports runtime `register/unregister`; `invalidate()` clears the cache.
+   326→  - `registerExtendedHealthChecks(registry, deps)` helper — registers every check whose dependency is present in the bag, so callers can incrementally wire checks as their infrastructure comes online.
+   327→- Created `/home/z/my-project/src/infrastructure/recovery/production-operations.ts` (~570 lines):
+   328→  - `StartupValidator`, `StartupValidationResult`, `GracefulShutdown`, `ReadinessGate`, `MaintenanceMode` interfaces per the spec.
+   329→  - `ProductionStartupValidator` — runs 5 checks: `database` (Prisma SELECT 1), `schema` (findFirst on eventRecord/outboxMessage/projectionCheckpoint), `event-store` (eventRecord.findFirst), `config` (re-validates DATABASE_URL/AUTH_SECRET presence via getConfig), `redis` (if REDIS_URL set → dynamically imports `getRedisClient` and pings; if unset → passed with "in-memory fallback acknowledged" message). Returns `{ passed, checks: [{name, passed, message}] }`.
+   330→  - `GracefulShutdownManager` — `registerHook(name, fn)` pushes onto a LIFO list; `shutdown(timeoutMs)` runs hooks in REVERSE registration order (so HTTP server closes before its DB pool), with `Promise.all` racing against a hard timeout that logs and resolves. Idempotent (second call returns immediately). Auto-binds SIGTERM + SIGINT handlers in the constructor (disable-able for tests via `autoBindSignals=false`); handler calls `shutdown(30_000)` then `process.exit(0)`. Safe in edge/serverless runtimes (skips signal binding if `process.on` is undefined).
+   331→  - `ReadinessGateImpl` — backed by a `Set<string>` of blocking reasons. `isReady()` returns true iff the set is empty. `block(reason)` adds to the set (deduped). `release()` clears all reasons. `releaseReason(reason)` releases one (for stacked blocks like startup+maintenance). `getBlockingReasons()` returns the array.
+   332→  - `MaintenanceModeImpl` — accepts an optional `RedisClient`. When provided, `enable(reason)` does `redis.set('maintenance:enabled', reason, 86400)` (24h safety TTL so a crashed instance doesn't leave maintenance permanently on); `disable()` does `redis.del`. When no Redis, falls back to a local `.maintenance` file (writes the reason, deletes on disable). `refresh()` re-reads the Redis key into the in-memory cache so maintenance enabled on one instance propagates to others via polling.
+   333→  - `createProductionOperations(redis?)` factory builds the standard 4-primitive bundle (validator + shutdown + readiness gate + maintenance) — the composition root calls this once at startup, blocks the gate, runs `validator.validate()` (fail fast on errors), releases the gate, then registers shutdown hooks.
+   334→- Added the three new modules to `src/infrastructure/index.ts` barrel export.
+   335→- Initial `bun run lint` surfaced two `@typescript-eslint/no-unsafe-declaration-merging` errors in `production-operations.ts`: the `MaintenanceMode` interface and the `MaintenanceMode` class shared a name. Renamed the class to `MaintenanceModeImpl` (mirrors `ReadinessGateImpl`) and updated the bundle factory accordingly. The interface name stays `MaintenanceMode` per the spec.
+   336→- Smoke-tested all three modules with a temporary test script (`tmp-smoke-test.ts`, deleted after run): metrics framework (counter accumulation by labels, gauge up/down, histogram count/min/max/sum/p50/p95/p99 over 100 observations, timer with double-stop protection, Prometheus exposition format with sorted labels and HELP/TYPE lines, getAll snapshot, reset), extended health checks (4-check parallel run, cache hit, TTL cache returns instantly, invalidate forces fresh run, failing check propagates as unhealthy with error message), production ops (readiness gate stacked reasons + partial release, maintenance mode enable/disable + cross-instance refresh via shared InMemoryRedisClient, graceful shutdown runs hooks in reverse order + idempotent second call, full startup validator against the live SQLite DB → all 5 checks PASSED). 52 assertions, 0 failures.
+   337→- Final verification: `bun run lint` → 0 errors. `bun run scripts/check-architecture.ts` → 0 violations across 175 files. `bunx tsc --noEmit --skipLibCheck` → no errors in any of the 3 new files (pre-existing errors in storage-provider/metrics.ts/handlers.ts/result.ts from other agents are unchanged and out of scope).
+   338→
+   339→Stage Summary:
+   340→- Three new infrastructure modules created (~1450 lines total): `metrics/metrics-framework.ts` (counters + gauges + histograms + timers + Prometheus exposition with pre-registered standard metrics), `telemetry/extended-health-checks.ts` (13 check factories covering the full M2 infrastructure surface + a parallel-executing TTL-cached registry with runtime custom-check support), `recovery/production-operations.ts` (StartupValidator + GracefulShutdownManager + ReadinessGateImpl + MaintenanceModeImpl + a convenience bundle factory).
+   341→- Architecture rules respected: `import type` used for all type-only imports (RedisClient, CircuitBreakerRegistry, WorkerRegistry, ProjectionEngine, Scheduler, StorageProvider, MessageQueue, RateLimiter, CacheProvider, EventBus/OutboxRepository/EventStore/Cache ports), no `any` types (duck-typed cache check uses `unknown` + `instanceof Promise`), no `process.env` outside shared/config (Redis check uses `getEnvVar('REDIS_URL')`), no ES2015 namespaces, no Prisma outside infrastructure (all `getClient()` calls are in `src/infrastructure/`).
+   342→- Lint passes (0 errors), architecture checker passes (0 violations, 175 files), TypeScript passes for all 3 new files. Smoke test (52 assertions) passes end-to-end against the live SQLite DB.
+   343→- NEXT (for main agent): (1) Wire `InMemoryMetricsFramework` into the DI container (bind as `MetricsFramework` token, replace or supplement `InMemoryMetricsRecorder` — the `MetricsRecorder` port is narrower, both can coexist with the framework providing the broader surface). (2) Add a `/api/metrics` route handler that calls `framework.toPrometheus()` with `Content-Type: text/plain; version=0.0.4`. (3) Wire `registerExtendedHealthChecks` into the composition root with the actual dependencies from the container (event bus, outbox, event store, projection engine, worker registry, circuit breaker registry, cache, rate limiter, optional Redis + storage + queue). (4) Wire `createProductionOperations()` into app startup: block the readiness gate at boot, run `validator.validate()` (fail fast on errors with non-zero exit), release the gate, register shutdown hooks (`close-http`, `stop-workers`, `disconnect-redis`, `db-disconnect`). (5) Update the `/api/ready` endpoint to consult both `ReadinessGate.isReady()` and `MaintenanceMode.isEnabled()`. (6) Optionally: poll `MaintenanceMode.refresh()` on a 5s interval so maintenance enabled on one instance propagates across the cluster.
+   344→
+   345→---
+   346→Task ID: M2-8
+   347→Agent: general-purpose
+   348→Task: Build backup framework + disaster recovery + performance infrastructure
+   349→
+   350→Work Log:
+   351→- Read worklog.md to inherit the M1/M2 architecture (DDD/CQRS/Event Sourcing, clean shared→domain→application→infrastructure→interfaces layers, architecture checker enforcing no `process.env` outside `shared/config/`, no Prisma outside `infrastructure/`, no `any` in domain/shared, `import type` for type-only imports, no ES2015 namespaces).
+   352→- Inspected existing infrastructure patterns: `getClient()` / `prisma` from `@/infrastructure/database/prisma` (transaction-aware client with `$disconnect` only on the singleton), `logger` from `@/shared/logging` (ScopedLogger with `system()` scope; `warn()` takes 2 args, `error()` takes 3), `getConfig()` / `getEnvVar()` from `@/shared/config` (the ONLY sanctioned way to read env vars from outside the config layer), `ProjectionEngine.rebuild()` from `@/infrastructure/projections/projection-engine`, `WorkerRegistry.shutdown()` from `@/infrastructure/workers/worker-framework`, `RedisClient` interface from `@/infrastructure/redis/redis-client`, `LockProvider` interface from `@/infrastructure/locking/lock-provider`. Reviewed `production-operations.ts` (the existing `MaintenanceMode` / `GracefulShutdownManager` primitives in `recovery/`) to ensure the new disaster-recovery module is complementary rather than redundant.
+   353→- Created `/home/z/my-project/src/infrastructure/backup/backup-framework.ts` (~725 lines):
+   354→  - Exported the exact interfaces from the spec: `BackupResult`, `BackupProvider`, `BackupSchedule`.
+   355→  - `LocalBackupProvider` implements all 6 methods: `backup(type)`, `list(limit)`, `get(id)`, `verify(id)`, `restore(id)`, `delete(id)`.
+   356→  - Database backup: parses `getConfig().database.url` for the `file:` prefix (SQLite), copies the DB file to `<backupDir>/<id>.db`, computes SHA-256. For non-SQLite providers, returns `partial` with a clear error directing callers to a PostgresBackupProvider (pg_dump).
+   357→  - Storage backup: recursively walks the configured `storageRoot` (skipping sidecar `.meta.json` files), builds a USTAR-format tar archive (custom 50-line implementation: 512-byte headers with octal size/mtime/checksum, regular-file typeflag '0', two zero blocks at end), gzip-compresses via `zlib.gzipSync`, writes to `<backupDir>/<id>.tar.gz`.
+   358→  - Configuration backup: serialises `getConfig()` as JSON with `auth.secret` redacted to `[REDACTED]` and `database.url` password masked.
+   359→  - Secrets-metadata backup: emits a curated list of 11 known env-var-derived config keys (`DATABASE_URL`, `AUTH_SECRET`, `REDIS_URL`, etc.) marked as sensitive/non-sensitive with descriptions. NO secret values are written.
+   360→  - Manifest persistence: single JSON file at `<backupDir>/manifest.json` containing `BackupResult[]`. In-memory cache avoids re-reading on every operation.
+   361→  - `verify()`: re-reads the artefact file, recomputes SHA-256, compares to the stored checksum.
+   362→  - `restore()`: gated behind `getEnvVar('BACKUP_RESTORE_CONFIRMED') === 'yes'` safety check (refuses + logs error if not set). Database restore disconnects Prisma first via `prisma.$disconnect()` (NOT `getClient().$disconnect()` — the transaction client type doesn't expose `$disconnect`), then copies the backup over the live DB file. Storage restore decompresses via `zlib.gunzipSync` and parses the USTAR stream back into files (with path-traversal guard). Configuration and secrets-metadata restores are informational-only (log a warning that operators must re-apply manually via the config layer / secret provider).
+   363→  - `delete()`: removes the artefact file (best-effort) and the manifest entry.
+   364→  - Bonus: `applyRetention(retentionByType)` keeps only the most recent N backups per type, pruning older ones — useful for scheduled cleanup.
+   365→  - `DEFAULT_BACKUP_SCHEDULES` const exported for wiring into the Scheduler (M2-3a).
+   366→- Created `/home/z/my-project/src/infrastructure/recovery/disaster-recovery.ts` (~495 lines):
+   367→  - Exported the exact types from the spec: `RecoveryMode`, `StartupRecoveryReport`, `DisasterRecoveryService`.
+   368→  - `DefaultDisasterRecoveryService` implements all 8 methods: `enterRecoveryMode`, `exitRecoveryMode`, `enterMaintenanceMode`, `exitMaintenanceMode`, `getMode`, `getReason`, `runStartupRecovery`, `replayProjections`, `gracefulShutdown`.
+   369→  - Mode coordination: writes `.recovery-mode` / `.maintenance-mode` flag files in the configured `modeDir` (default: `process.cwd()`). File format: line 1 = ISO timestamp, line 2 = human-readable reason. If a `RedisClient` is injected, also sets `dr:mode:recovery` / `dr:mode:maintenance` keys with a 24-hour TTL so other instances in a cluster observe the change. Maintenance takes precedence over recovery.
+   370→  - `getMode()` is synchronous (uses `existsSync` on the flag files) — documented that Redis cannot be consulted from a sync getter, so instances observing a Redis mode change should call `enter*Mode()` locally to materialise the flag file.
+   371→  - `getReason()` is synchronous (uses `readFileSync`). Bonus `getReasonAsync()` checks Redis for cluster-wide authority.
+   372→  - `runStartupRecovery()` performs 4 checks and returns a `StartupRecoveryReport`:
+   373→    1. **Incomplete outbox messages**: queries `outboxMessage` for `status='pending' AND retryCount > 0 AND updatedAt < (now - 5min)`, resets their `retryCount: 0, error: null` so the publisher picks them up cleanly. Messages with `retryCount=0` waiting their turn are NOT considered stuck.
+   374→    2. **Stuck projections**: compares each `ProjectionCheckpoint.lastEventRowId` to the latest `EventRecord.id` (auto-increment head). If lag exceeds 1000 events (configurable), counts the projector as stuck and triggers `replayProjections()` once.
+   375→    3. **Expired sessions**: the schema has no Session table for auth sessions, so this purges expired `IdempotencyRecord` entries (the closest analog — both have `expiresAt` and represent state that should be cleaned up after expiry). Documented in the code.
+   376→    4. **Stale locks**: requires a `RedisClient`. Scans `lock:*` keys, checks TTL via `redisClient.ttl(key)`. Keys with TTL = -1 (exist but no expiry — likely abandoned) are deleted. In-memory `MemoryLockProvider` locks cannot be introspected without modifying the `LockProvider` interface, so they're skipped with a logged action.
+   377→    - Each step pushes a human-readable action string to the `actions` array. Errors in any step are caught, logged, and recorded as actions (don't abort the whole recovery).
+   378→  - `replayProjections()`: delegates to `ProjectionEngine.rebuild()` with start/complete logging.
+   379→  - `gracefulShutdown(timeoutMs)`: races `workerRegistry.shutdown()` + `prisma.$disconnect()` against a hard timeout. If the timeout fires, logs an error and calls `process.exit(1)` so the orchestrator (Kubernetes) can restart the process — a partially-drained process is worse than a clean restart.
+   380→- Created `/home/z/my-project/src/infrastructure/performance/performance.ts` (~470 lines):
+   381→  - Exported the exact interfaces from the spec: `PerformanceMiddleware`, `CacheOptions`, `StreamOptions`, `SlowQuery`, `PoolMetrics`.
+   382→  - `DefaultPerformanceMiddleware` implements all 7 methods: `compress`, `setCacheHeaders`, `setETag`, `streamResponse`, `trackQuery`, `getSlowQueries`, `getPoolMetrics`.
+   383→  - `compress(response)`: documented limitation — the Fetch `Response` interface doesn't expose the request, so we can't read `Accept-Encoding` here. For streaming responses, returns unchanged and logs a debug message directing callers to `compressBuffer()` or Next.js's built-in compression. Bonus `compressBuffer(data, init?)` method for callers with a complete body in memory: gzips via `zlib.gzipSync` if `data.length >= 1024` and no existing `Content-Encoding`, sets `Content-Encoding: gzip`, `Content-Length`, `Vary: Accept-Encoding`.
+   384→  - `setCacheHeaders(response, options)`: composes `Cache-Control` from options (`no-store` → `no-store, no-cache, must-revalidate`; otherwise `public`/`private, max-age=N, stale-while-revalidate=N`). Sets `Last-Modified` to now (or preserves existing). Sets a weak ETag (`W/"<sha1-of-last-modified>"`) so the response carries *an* ETag even without calling `setETag()`.
+   385→  - `setETag(response, data, ifNoneMatch?)`: computes strong ETag as `"<sha1-hex>"`, sets `ETag` header. If `ifNoneMatch` is supplied (the request's `If-None-Match` value), parses the comma-separated list and returns a 304 response on match (supporting exact, weak `W/`, and `*` wildcards). The optional 3rd param is added on the implementation (TypeScript allows extra optional params not in the interface) so the interface signature stays exactly `setETag(response, data): Response`.
+   386→  - `streamResponse(data, options?)`: wraps an `AsyncIterable<Uint8Array>` into a `ReadableStream` via a `pump()` helper that awaits each chunk and enqueues it, closing on completion or erroring on throw. Sets `Content-Type`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, plus any caller-supplied headers.
+   387→  - `trackQuery(sql, durationMs)`: if `durationMs >= slowQueryThresholdMs` (default 100ms), pushes a `SlowQuery` entry to a bounded ring buffer (default cap 200, shifts oldest when full). Truncates SQL > 2000 chars to avoid log bloat. Logs a warn per slow query.
+   388→  - `getSlowQueries(limit?)`: returns the ring buffer sorted by `durationMs` desc, optionally limited.
+   389→  - `getPoolMetrics()`: parses `connection_limit` from `DATABASE_URL` for the `max` value (returns 1 for SQLite — single-writer; `DEFAULT_POOL_MAX = 10` fallback). Documented that Prisma doesn't expose exact active/idle/waiting counts — operators should use `pg_stat_activity` (PostgreSQL) or `prisma.$metrics.json()` (behind `enableMetrics` feature flag) for live numbers. Returns `{ active: 0, idle: 0, waiting: 0, max }`.
+   390→  - Bonus: `getPerformanceMiddleware()` singleton accessor.
+   391→- Fixed 5 TypeScript errors uncovered by `bunx tsc --noEmit`:
+   392→  1. `walkFiles()` used `Awaited<ReturnType<typeof readdir>>` which expanded to a union including `Buffer[]` variants — replaced with explicit `Dirent[]` type and `entry.name as string` cast.
+   393→  2. `restoreDatabase()` called `getClient().$disconnect()` — the `PrismaTransactionClient` type omits `$disconnect`. Switched to `prisma.$disconnect()` (the singleton) and removed the now-unused `getClient` import.
+   394→  3. `restoreDatabase()` called `logger.system().warn(msg, ctx, error)` — `warn()` only takes 2 args. Switched to `error()` which takes 3.
+   395→  4. `compressBuffer()` passed `Buffer` directly to `new Response()` — TS DOM lib types don't accept `Buffer` as `BodyInit` in this config. Cast via `data as unknown as BodyInit`.
+   396→  5. `runStartupRecovery()` passed a typed `StartupRecoveryReport` object directly to `logger.system().info()` — TS rejected it as not assignable to `LogContext` (index signature). Spread to `{ ...report }` to produce a fresh object literal.
+   397→- Ran a comprehensive smoke test (`/tmp/smoke-m2-8.ts`, deleted after run) exercising every public method across all three modules with mock ProjectionEngine/WorkerRegistry and a tmp filesystem:
+   398→  - Backup: storage backup (tar.gz, 136 bytes for 2 small files), configuration backup (645 bytes, `auth.secret` correctly redacted to `[REDACTED]`), secrets-metadata backup (11 names), verify (checksum match), list (3 entries), restore refused without `BACKUP_RESTORE_CONFIRMED=yes`, restore succeeds with confirmation, delete (list drops to 2), retention pruning.
+   399→  - Disaster recovery: mode transitions normal → recovery → maintenance → recovery → normal, maintenance precedence over recovery, reason retrieval, file-flag persistence.
+   400→  - Performance: 3 of 5 synthetic queries above 100ms threshold tracked (top = 170ms), ring buffer capped at 200 (after 250 inserts), pool metrics (`max: 1` for SQLite), compressBuffer (gzip for 2048-byte buffer, none for 100-byte), cache-control composition (`private, max-age=300, stale-while-revalidate=60` and `no-store, no-cache, must-revalidate`), weak ETag from Last-Modified, strong ETag from SHA-1, 304 short-circuit on `If-None-Match` match, 200 on mismatch, streamResponse consumed 3 chunks correctly.
+   401→  - All smoke tests passed.
+   402→
+   403→Stage Summary:
+   404→- Three new infrastructure modules created exactly at the requested paths:
+   405→  1. `src/infrastructure/backup/backup-framework.ts` (~725 lines) — `LocalBackupProvider` with database (SQLite file copy / pg_dump stub), storage (custom USTAR tar writer + gzip), configuration (redacted JSON), and secrets-metadata (names only, no values) backups. SHA-256 checksum verification, restore gated behind `BACKUP_RESTORE_CONFIRMED=yes` env var, JSON manifest persistence, retention policy helper, default schedule presets.
+   406→  2. `src/infrastructure/recovery/disaster-recovery.ts` (~495 lines) — `DefaultDisasterRecoveryService` with file-flag + Redis mode coordination (maintenance > recovery precedence), sync `getMode()` / `getReason()` (uses `existsSync` / `readFileSync`) plus bonus async `getReasonAsync()` for cluster-wide authority, 4-step startup recovery (stuck outbox messages, projection lag detection + auto-replay, expired idempotency purge, stale Redis lock cleanup), projection replay delegation, graceful shutdown with hard-timeout force-exit.
+   407→  3. `src/infrastructure/performance/performance.ts` (~470 lines) — `DefaultPerformanceMiddleware` with gzip compression (Buffer variant for non-streaming bodies, illustrative no-op for streaming responses), HTTP cache headers (Cache-Control composition + weak ETag from Last-Modified), strong ETag with optional `If-None-Match` → 304 short-circuit, async-iterable-to-ReadableStream streaming, slow-query ring buffer (threshold + cap configurable, default 100ms / 200 entries), Prisma pool metrics (`max` parsed from `connection_limit`, others 0 with documented limitation).
+   408→- All architecture rules respected: `import type` for type-only imports throughout, no `any` types, no `process.env` literals (uses `getEnvVar()` for the restore-confirmation check), no Prisma outside infrastructure, no ES2015 namespaces.
+   409→- `bun run lint` passes (0 errors). `bun run scripts/check-architecture.ts` passes (0 violations, 177 files scanned). `bunx tsc --noEmit --skipLibCheck` passes for all 3 new files (0 errors).
+   410→- Functional smoke test passes end-to-end across all three modules: backup create/verify/list/restore/delete/retention, DR mode transitions + startup recovery (mocked), performance compression/caching/ETag/streaming/slow-query/pool-metrics.
+   411→- NEXT (for main agent): (1) Wire `LocalBackupProvider` into `composition-root.ts` and register the 4 `DEFAULT_BACKUP_SCHEDULES` with the Scheduler (M2-3a). (2) Wire `DefaultDisasterRecoveryService` into the composition root — pass the real `ProjectionEngine`, `WorkerRegistry`, and `RedisClient` (if available); call `runStartupRecovery()` at boot after `ProductionStartupValidator.validate()`; bind `gracefulShutdown(30_000)` to SIGTERM/SIGINT. (3) Optionally expose `/api/admin/backup`, `/api/admin/recovery`, and `/api/admin/performance` endpoints that delegate to these services (gated behind admin authorization). (4) For production multi-instance, implement `S3BackupProvider` (same `BackupProvider` interface) using the existing `S3StorageProvider` as a reference.
+   412→
+   413→---
+   414→Task ID: M2-10
+   415→Agent: frontend-styling-expert
+   416→Task: Update landing page for Milestone 2 infrastructure showcase
+   417→
+   418→Work Log:
+   419→- Read `/home/z/my-project/worklog.md` to inherit the full M1 + M2 architecture context (DDD/CQRS/Event Sourcing foundation plus M2 platform services: Redis, cache, locks, retries, circuit breakers, message queue, DLQ, workers, scheduler, storage, CDN, search, feature flags, secrets, config, rate limiting, notifications, metrics, extended health, backups, DR, performance, production ops).
+   420→- Read `/home/z/my-project/src/app/page.tsx` (1,559 lines) to understand the existing M1 dashboard: Header/Hero, ArchitectureLayers, HealthDashboard, EventSourcingDemo, RegistryDisplay, PipelineVisualization, Footer. Noted the design tokens (dark slate-950 bg, emerald/cyan accents, monospace technical data, StatusDot/accentClasses helpers, SectionHeading pattern).
+   421→- Inspected M2 API routes and handlers to lock the response shapes used by the new UI: `/api/health/extended` returns `{ status, timestamp, checks[] }` (same shape as basic health, but ~13 checks), `/api/workers/health` returns `{ workers: WorkerHealth[] }` with `name, running, lastRunAt, lastError, totalProcessed, totalErrors, avgDurationMs`, `/api/metrics` returns Prometheus `text/plain; version=0.0.4`, `/api/feature-flags` GET returns `{ flags: FeatureFlag[] }` and POST handles `action: set | evaluate | delete`.
+   422→- Inspected `src/infrastructure/feature-flags/feature-flags.ts` and `src/infrastructure/telemetry/extended-health-checks.ts` to mirror the real `FeatureFlag` and `FlagType` types and the registered extended-health check names (`database, redis, event-bus, outbox, event-store, projection-engine, queue, storage, scheduler, workers, circuit-breakers, cache, rate-limiter`).
+   423→- Verified shadcn/ui primitives available: `Select`, `Switch`, `ScrollArea`, `Badge`, `Card`, `Button`, `Input`, `Label`, `Separator`, `Tabs` — imported `Select`/`Switch` (and 18 new Lucide icons: `AlertTriangle, BarChart3, Bell, DatabaseBackup, ExternalLink, Flag, Gauge, KeyRound, LifeBuoy, Lock, Mail, MessageSquare, Plus, ServerCog, Settings, ShieldAlert, Trash2, Webhook`) without disturbing the existing icon block.
+   424→- Edited `src/app/page.tsx` (now 2,988 lines) in one atomic MultiEdit:
+   425→  1. Imports — added `Select`/`Switch` from shadcn/ui and 18 new Lucide icons.
+   426→  2. Types — appended `WorkerHealth`, `WorkerHealthResponse`, `FlagType`, `FeatureFlag`, `FeatureFlagListResponse`, `EvaluationResult` after the existing M1 types.
+   427→  3. Constants — extended `COMPONENT_ICONS` to cover all 13 extended-health check names; added `PlatformServiceEntry`/`PlatformServiceGroup` types and a `PLATFORM_SERVICE_GROUPS` array of 6 groups / 27 services (Caching & Resilience, Messaging & Workers, Storage & Search, Platform Services, Notifications, Operations); added `KEY_METRIC_NAMES` (commands_dispatched_total, queries_executed_total, worker_processed_total, cache_hits_total, circuit_breaker_state).
+   428→  4. Header — updated the milestone crumb to "milestone 1 → 2 / production infrastructure" and added Redis / Workers / Metrics / Feature Flags badges alongside the existing DDD/CQRS/Event Sourcing/Outbox badges.
+   429→  5. Home — appended new sections after `PipelineVisualization`: `M2SectionBanner`, `PlatformServicesGrid`, `ExtendedHealthDashboard`, `WorkerHealthMonitor`, `PrometheusMetrics`, `FeatureFlagsManager` (each separated by `Separator`).
+   430→  6. Footer — relabelled "Health Endpoints" to "Infrastructure Endpoints" and added `/api/health/extended`, `/api/metrics`, `/api/workers/health`, `/api/feature-flags`; updated the byline to call out "Milestone 2 · Caching · Messaging · Workers · Storage · Notifications · Operations" and "Next.js · TypeScript · Prisma · Redis · shadcn/ui".
+   431→  7. New component functions appended at end of file:
+   432→     - `M2SectionBanner` — gradient banner announcing the M2 section.
+   433→     - `PlatformServicesGrid` — 6 grouped sections, responsive 2-4 column grid of 27 service cards (icon + name + description).
+   434→     - `ExtendedHealthDashboard` — fetches `/api/health/extended` every 5s with Pause/Refresh controls; shows overall status, healthy/degraded/unhealthy counts, last-updated time, and a 12-skeleton-loading grid of all checks (each card: icon + name + status badge + latency in ms).
+   435→     - `WorkerHealthMonitor` — fetches `/api/workers/health` every 5s; 4-column grid of `WorkerCard`s showing running dot, status badge, totalProcessed, totalErrors, avgDurationMs, lastRunAt, and a collapsible lastError banner.
+   436→     - `PrometheusMetrics` — fetches `/api/metrics` as text every 10s; left card extracts latest values for the 5 KEY_METRIC_NAMES with an "Open raw /api/metrics" external link; right card renders the raw Prometheus text in a `ScrollArea`-backed `<pre>` with monospace font, syntax-highlighting for `# HELP` / `# TYPE` / key-metric lines (emerald tint), and a "View full metrics / Show first 50" toggle.
+   437→     - `FeatureFlagsManager` — interactive create/evaluate/delete UI: create form with key Input, type Select (all 8 FlagTypes), percentage Input (conditionally shown for `percentage` type), enabled Switch; evaluate panel with flag Select, optional userId/country inputs, result badge (enabled/disabled) + reason text; registered-flags list with type/enabled/percentage/countries badges and Trash2 delete buttons. All actions POST to `/api/feature-flags` with the correct `action` payload and refresh the list afterwards.
+   438→- All new components reuse existing helpers (`SectionHeading`, `StatusDot`, `statusColor`, `accentClasses`) and the established visual language (slate-950 background, emerald/cyan accents, monospace for IDs/JSON/metrics, ring-1 ring-inset slate-800/60 cards, no indigo/blue).
+   439→- Verified: `bun run lint` passes with 0 errors; `npx tsc --noEmit` reports 0 errors in `page.tsx`. The file grew from 1,559 → 2,988 lines (1,429 new lines). All M1 sections (Hero, Architecture Layers, Live Health, Event Sourcing Demo, Registry, Pipeline Viz, Footer) remain intact and unchanged in behavior.
+   440→
+   441→Stage Summary:
+   442→- Landing page extended from a 5-section M1 architecture dashboard to a 10-section production platform showcase spanning both milestones. The M2 half introduces a Platform Services catalogue (27 services across 6 domains), a live Extended Health Dashboard (~13 parallel TTL-cached checks with healthy/degraded/unhealthy counts), a Worker Health Monitor (Outbox/Projection/Cleanup/Analytics workers with throughput/latency/error metrics), a Prometheus Metrics Preview (raw text/plain output with key-metric extraction and syntax highlighting), and an interactive Feature Flags Manager (full CRUD + runtime evaluation across all 8 flag types).
+   443→- Every new section is wired to a real M2 API endpoint (`/api/health/extended`, `/api/workers/health`, `/api/metrics`, `/api/feature-flags`) with auto-refresh, pause/resume controls, loading skeletons, and graceful error states. Design tokens stay consistent with M1: dark slate-950 background, emerald/cyan accents (no indigo/blue), monospace for technical data, sticky footer with `mt-auto`, and `min-h-screen flex flex-col` root.
+   444→- Lint (`bun run lint`) and TypeScript (`npx tsc --noEmit`) both pass cleanly. No other files were modified.
+   445→
+   446→---
+   447→Task ID: M2-Final
+   448→Agent: main
+   449→Task: Wire all M2 infrastructure into DI container, add API routes, update landing page, final verification
+   450→
+   451→Work Log:
+   452→- Added Prisma models: ScheduledJob, WebhookRegistration, WebhookDelivery, BackupRecord, FeatureFlagRecord (DeadLetterMessage was already added by subagent)
+   453→- Ran db:push to sync schema
+   454→- Added 25+ new DI tokens for all M2 infrastructure services
+   455→- Rewrote composition-root.ts to wire all infrastructure:
+   456→  - Redis client (with in-memory fallback)
+   457→  - CacheProvider (Redis or Memory based on backend)
+   458→  - LockProvider (Redis or Memory)
+   459→  - CircuitBreakerRegistry
+   460→  - RateLimiter (Redis or Memory)
+   461→  - MessageQueue + DeadLetterQueue
+   462→  - StorageProvider, CdnProvider, SearchProvider
+   463→  - FeatureFlagService, SecretProvider, ConfigService
+   464→  - EmailProvider, SmsProvider, PushProvider, WebhookEngine
+   465→  - SessionStore, JwtService
+   466→  - MetricsFramework (Prometheus-compatible)
+   467→  - ExtendedHealthCheckRegistry (13 checks)
+   468→  - BackupProvider, DisasterRecoveryService, PerformanceMiddleware
+   469→  - GracefulShutdownManager, ReadinessGate, MaintenanceMode
+   470→  - WorkerRegistry (4 workers: Outbox, Projection, Cleanup, Analytics)
+   471→  - Scheduler
+   472→- Used global singleton pattern for container to persist across Next.js dev module reloads
+   473→- Created instrumentation.ts to auto-start workers and scheduler on server startup
+   474→- Added webpackIgnore comments to dynamic imports for optional packages (twilio, nodemailer, firebase-admin, @aws-sdk/client-s3, ioredis)
+   475→- Added new API routes: /api/metrics, /api/health/extended, /api/workers/health, /api/feature-flags
+   476→- Fixed QueryCacheMiddleware to handle cache gracefully (defensive null check)
+   477→- Fixed feature-flags route handler body validation
+   478→- Dispatched frontend-styling-expert subagent to update landing page with M2 sections
+   479→- Final verification: all 8 API endpoints return 200, full CQRS flow works, extended health all healthy, all 4 workers running
+   480→
+   481→Stage Summary:
+   482→- 182 TypeScript source files (up from 147 in M1)
+   483→- Lint: 0 errors
+   484→- Architecture checker: 0 violations (182 files)
+   485→- All 8 API endpoints: HTTP 200
+   486→- Extended health: all 9 checks healthy (database, redis, event-bus, outbox, event-store, projection-engine, workers, cache, rate-limiter)
+   487→- Workers: OutboxWorker, ProjectionWorker, CleanupWorker, AnalyticsWorker all running
+   488→- CQRS flow verified: dispatch → auto-process → query returns game data
+   489→- Feature flags: create/evaluate/list all working
+   490→- Prometheus metrics: available at /api/metrics
+   491→- Landing page: all M1 + M2 sections rendering correctly
+   492→
+   493→---
+   494→Task ID: M3-3
+   495→Agent: general-purpose
+   496→Task: Build identity application commands and queries
+   497→
+   498→Work Log:
+   499→- Read worklog.md to inherit the M1/M2 architecture (DDD/CQRS/Event Sourcing, clean shared→domain→application→infrastructure→interfaces layers, architecture checker enforcing no `process.env` outside `shared/config/`, no Prisma outside `infrastructure/`, `import type` for type-only imports, no `any` types, no ES2015 namespaces).
+   500→- Inspected the existing identity domain layer built in M3-1/M3-2: `UserAggregate` (waitlist/approve/reject/suspend/reactivate/delete/profile/email/password/MFA/role/membership methods), `OrganizationAggregate` (create/addMember/removeMember), domain repositories (User/Organization/Role/Permission/ApiKey/AuditLog/Device/Waitlist), service ports (PasswordHasher/MfaProvider/OAuthProvider/BreachChecker), `RiskEngine`, `RbacEngine`/`AbacEngine`/`PolicyEngine`, and value objects (Email/Username/DisplayName/Timezone/Locale/Country/PasswordHash/PhoneNumber/RoleId/PermissionId/DeviceId/UserId).
+   501→- Reviewed the existing M1 application layer patterns (`CommandWithPayload<TPayload>`, `QueryWithPayload<TPayload, TResult>`, `CommandHandler`/`QueryHandler`, `Result<T>`, `ZodValidator`, `registerCommandValidator`/`registerQueryValidator`) and the `PublishGame`/`GetGame` reference handlers.
+   502→- Created `/home/z/my-project/src/application/ports/identity-ports.ts` (~226 lines) — application-layer port interfaces that the identity command/query handlers depend on. Avoids importing infrastructure. Defines:
+   503→  - `AppSession` + `AppSessionStore` (create/get/getByToken/getByUserId/revoke/revokeAllForUser/refresh) — mirrors the infrastructure `SessionStore` contract via structural typing.
+   504→  - `AppJwtService` (sign/verify/decode).
+   505→  - `ApiKeyHasher` (hash/verify/generate — returns plaintext+hash+prefix for one-time display).
+   506→  - `EmailService` (sendVerificationEmail/sendPasswordResetEmail/sendWelcomeEmail).
+   507→  - `TokenType` ('email_verification' | 'password_reset') + `TokenStore` (issue/consume/peek — single-use tokens).
+   508→  - `GeoLocation` + `GeoLocationService` (IP geolocation for risk scoring).
+   509→  - `LoginThrottle` (recordFailure/getFailureCount/reset — brute-force protection).
+   510→  - Read-model stores + view DTOs: `UserView`, `UserListFilters`, `PaginatedResult<T>`, `UserReadModelStore`, `OrganizationView`, `OrganizationListFilters`, `OrganizationMemberView`, `OrganizationReadModelStore`, `UserPermissionView`. Query handlers read from these materialised views instead of loading aggregates.
+   511→- Created `/home/z/my-project/src/application/commands/identity/schemas.ts` (~355 lines) — Zod schemas for ALL 31 identity commands and 15 queries, exported individually + as `IDENTITY_COMMAND_SCHEMAS` / `IDENTITY_QUERY_SCHEMAS` bulk-registration arrays. Composition root iterates these arrays and calls `registerCommandValidator`/`registerQueryValidator`.
+   512→- Created `/home/z/my-project/src/application/commands/identity/auth-commands.ts` (~911 lines) — 8 commands + 8 handlers:
+   513→  - `RegisterUserCommand` — validates Email/Username/DisplayName/Country/Timezone/Locale value objects, checks email/username uniqueness, password strength + breach check (HaveIBeenPwned-style), hashes password (Argon2id via PasswordHasher port), builds `UserAggregate.create(...)`, persists via `userRepo.save(user, 0)`, mirrors into WaitlistRepository, issues an email-verification token via TokenStore, sends verification email (best-effort).
+   514→  - `VerifyEmailCommand` — consumes the token (single-use), loads user, calls `user.verifyEmail()`, persists, updates waitlist entry to `email_verified`.
+   515→  - `LoginCommand` — loads user by email, runs password verify (constant-time, no timing oracle), enforces status checks (deleted/suspended/pending), throttle lockout (MAX_LOGIN_FAILURES=10), optional RiskEngine assessment (new device / impossible travel / unusual location / abnormal time / IP reputation), MFA step-up (returns `requiresMfa: true` + `mfaChallenge` if RiskEngine or user.mfaEnabled requires it), mints JWT via `AppJwtService.sign()`, creates session via `AppSessionStore.create()` with refresh-token rotation, upserts DeviceRepository record, resets throttle counter, writes audit log.
+   516→  - `LogoutCommand` — idempotent session revocation.
+   517→  - `RefreshSessionCommand` — looks up session by refresh token (via `getByToken` — composition root must select an adapter that indexes both access + refresh tokens), validates revocation + refresh-token expiry, re-loads user (rejects if no longer active), mints new JWT, rotates refresh token via `sessionStore.refresh()`.
+   518→  - `ChangePasswordCommand` — verifies current password, enforces strength + breach + difference checks, hashes new password, calls `user.changePassword(...)`, persists, revokes all other sessions (force re-login).
+   519→  - `RequestPasswordResetCommand` — always returns success (never reveals whether email is registered), issues a password_reset token (1h TTL), sends reset email (best-effort).
+   520→  - `ResetPasswordCommand` — consumes the token, loads user, enforces strength + breach checks, hashes new password, calls `user.changePassword(...)` with `changedBy: 'system'`, persists, revokes all sessions.
+   521→- Created `/home/z/my-project/src/application/commands/identity/waitlist-commands.ts` (~232 lines) — 3 commands + 3 handlers:
+   522→  - `ApproveUserCommand` — loads user, calls `user.approve(approvedBy, notes)`, persists, updates waitlist entry to `approved` with `invitedById`, sends welcome email (best-effort).
+   523→  - `RejectUserCommand` — guards against rejecting active users (must suspend instead), calls `user.reject(...)`, updates waitlist entry to `rejected` with reason.
+   524→  - `SubmitForApprovalCommand` — pre-checks `user.emailVerified`, calls `user.submitForApproval()` (a sub-state transition that the aggregate handles internally without raising an event), mirrors status into the waitlist table for admin visibility.
+   525→- Created `/home/z/my-project/src/application/commands/identity/user-management-commands.ts` (~635 lines) — 9 commands + 9 handlers:
+   526→  - `SuspendUserCommand` — calls `user.suspend(...)`, revokes all sessions via `AppSessionStore.revokeAllForUser()`, writes audit.
+   527→  - `ReactivateUserCommand` — calls `user.reactivate(...)`, writes audit.
+   528→  - `DeleteUserCommand` — calls `user.delete(...)`, revokes sessions, writes audit.
+   529→  - `UpdateProfileCommand` — validates DisplayName/Timezone/Locale value objects, calls `user.updateProfile(...)`.
+   530→  - `ChangeEmailCommand` — validates new Email, checks uniqueness, calls `user.changeEmail(...)`, issues a fresh verification token + email.
+   531→  - `EnableMfaCommand` — verifies method matches the configured MfaProvider, calls `mfaProvider.setup()` to get secret+QR+backup codes, then `user.enableMfa(method)`, returns the setup artefacts once.
+   532→  - `DisableMfaCommand` — calls `user.disableMfa()`, then `mfaProvider.disable(userId)` for cleanup (best-effort).
+   533→  - `AssignRoleCommand` — loads RoleData to resolve the role name, calls `user.addRole(roleId, roleName, assignedBy)`.
+   534→  - `RemoveRoleCommand` — calls `user.removeRole(roleId, removedBy)`.
+   535→- Created `/home/z/my-project/src/application/commands/identity/organization-commands.ts` (~334 lines) — 4 commands + 4 handlers:
+   536→  - `CreateOrganizationCommand` — slug uniqueness pre-check, calls `OrganizationAggregate.create(...)`, persists via `orgRepo.save(org, 0)`.
+   537→  - `AddMemberCommand` — loads org + user + role, validates user is active, calls `org.addMember(...)` AND mirrors onto the user aggregate via `user.joinOrganization(...)` (best-effort: if the user aggregate already has the membership, the org's member list is the source of truth).
+   538→  - `RemoveMemberCommand` — calls `org.removeMember(...)`, mirrors onto user via `user.leaveOrganization(...)` (best-effort).
+   539→  - `JoinOrganizationCommand` — self-service join; loads user + org + role, validates user is active + org is active, mutates user aggregate first (`user.joinOrganization`), then mirrors onto org via `org.addMember(userId, roleId, userId)` where `addedBy = userId` (self-join).
+   540→- Created `/home/z/my-project/src/application/commands/identity/api-key-commands.ts` (~271 lines) — 3 commands + 3 handlers:
+   541→  - `CreateApiKeyCommand` — requires ≥1 scope, validates `expiresAt` is a future ISO timestamp, generates plaintext+hash+prefix via `ApiKeyHasher.generate()`, persists an `ApiKeyData` record (with `keyHash`, `keyPrefix`, `active: true`), writes audit, returns the plaintext ONCE (caller must display + discard).
+   542→  - `RotateApiKeyCommand` — verifies ownership (`existing.userId === userId`), rejects revoked keys, generates new plaintext+hash+prefix, updates the record via `apiKeyRepo.update()` (resets `lastUsedAt` / `lastUsedIp`), returns new plaintext.
+   543→  - `DisableApiKeyCommand` — idempotent (already-disabled returns success), sets `active: false` + `revokedAt: now`, writes audit.
+   544→- Created `/home/z/my-project/src/application/commands/identity/role-commands.ts` (~313 lines) — 5 commands + 5 handlers:
+   545→  - `CreateRoleCommand` — name uniqueness check, builds a `RoleData` record (always `isSystem: false` for user-created roles), persists.
+   546→  - `UpdateRoleCommand` — rejects modifications to system roles, validates name uniqueness if changed, applies partial updates (name/description/permissions).
+   547→  - `DeleteRoleCommand` — rejects deletion of system roles.
+   548→  - `CreatePermissionCommand` — idempotent on (resource, action) pair: if it already exists, returns the existing ID. Otherwise builds a `PermissionData` record with id = `${resource}.${action}`.
+   549→  - `DeletePermissionCommand` — rejects deletion of system permissions.
+   550→- Created `/home/z/my-project/src/application/commands/identity/index.ts` — barrel export re-exporting all 6 command files.
+   551→- Created `/home/z/my-project/src/application/queries/identity/user-queries.ts` (~258 lines) — 4 queries + 4 handlers:
+   552→  - `GetUserQuery` — reads from `UserReadModelStore.getById()`; falls back to rehydrating the UserAggregate via `UserRepository.getById()` and projecting it to a `UserView` (only used before projectors are wired in).
+   553→  - `ListUsersQuery` — forwards filters (status/search/limit/offset) to `UserReadModelStore.list()`, returns `PaginatedResult<UserView>`.
+   554→  - `GetCurrentUserQuery` — same shape as GetUser; the auth pipeline has already verified the session.
+   555→  - `GetUserPermissionsQuery` — loads the UserAggregate, resolves effective permissions via `RbacEngine.getPermissions(roleIds)` (or, if no engine is wired, computes a flat union from `RoleRepository.list()`), returns `UserPermissionView` with permissions + roles + organization memberships.
+   556→- Created `/home/z/my-project/src/application/queries/identity/waitlist-queries.ts` (~97 lines) — `ListWaitlistQuery` (forwards filters to `WaitlistRepository.list()`, returns items + total count) and `GetWaitlistStatsQuery` (calls `countByStatus()`, sums to a total).
+   557→- Created `/home/z/my-project/src/application/queries/identity/organization-queries.ts` (~184 lines) — `GetOrganizationQuery` (read-model with aggregate fallback), `ListOrganizationsQuery` (paginated), `GetOrganizationMembersQuery` (read-model with aggregate fallback that projects the org's member list).
+   558→- Created `/home/z/my-project/src/application/queries/identity/audit-queries.ts` (~111 lines) — `ListAuditLogQuery` (forwards actorId/targetType/action/dateRange/limit/offset filters to `AuditLogRepository.list()`) and `GetAuditEntryQuery` (single lookup by ID).
+   559→- Created `/home/z/my-project/src/application/queries/identity/api-key-queries.ts` (~114 lines) — `ListApiKeysQuery` + `GetApiKeyQuery`, both stripping the `keyHash` field before returning (a `toView()` helper projects `ApiKeyData` → `ApiKeyView`).
+   560→- Created `/home/z/my-project/src/application/queries/identity/role-queries.ts` (~99 lines) — `ListRolesQuery` + `ListPermissionsQuery` (no-payload variants) plus `ListRolesQueryWithPayload` + `ListPermissionsQueryWithPayload` aliases for callers that prefer payload-bearing queries.
+   561→- Created `/home/z/my-project/src/application/queries/identity/index.ts` — barrel export re-exporting all 6 query files.
+   562→- Fixed 3 lint errors: empty interfaces (`GetWaitlistStatsPayload`, `ListRolesPayload`, `ListPermissionsPayload`) → replaced with `Record<string, never>` type aliases (the `@typescript-eslint/no-empty-object-type` rule forbids empty `interface {}` declarations).
+   563→- Verified all architectural rules:
+   564→  - All type-only imports use `import type` (UserAggregate, OrganizationAggregate, repository interfaces, ports, etc.).
+   565→  - Concrete value-object imports (Email, Username, DisplayName, Timezone, Locale, PasswordHash, Country) use regular `import` (they're instantiated).
+   566→  - NO `any` types anywhere.
+   567→  - NO `process.env` access (would be flagged by architecture checker).
+   568→  - NO Prisma imports outside infrastructure (would be flagged).
+   569→  - NO ES2015 namespaces.
+   570→  - Each handler constructor takes only port/repository INTERFACES (e.g., `UserRepository`, `AppSessionStore`, `ApiKeyHasher`, `UserReadModelStore`, `RbacEngine`) — no concrete implementations.
+   571→  - Handlers are NOT registered with the CommandBus/QueryBus in this layer (composition root's job); Zod schemas are exported as bulk-registration arrays for the composition root to consume.
+   572→- Ran `bun run lint` (0 errors), `bun run scripts/check-architecture.ts` (0 violations, 226 files scanned), and `bunx tsc --noEmit` (0 errors in the new application/ files — pre-existing domain-layer errors about event-class typing are unrelated to this task and present in the codebase before this work).
+   573→
+   574→Stage Summary:
+   575→- 16 new files created (8 command/query modules + 2 barrel exports + 1 schemas file + 1 application ports file):
+   576→  - `src/application/ports/identity-ports.ts` (~226 lines) — AppSession/AppSessionStore/AppJwtService/ApiKeyHasher/EmailService/TokenStore/GeoLocationService/LoginThrottle ports + UserView/OrganizationView/UserPermissionView read-model DTOs + UserReadModelStore/OrganizationReadModelStore ports.
+   577→  - `src/application/commands/identity/schemas.ts` (~355 lines) — Zod schemas for all 31 commands + 15 queries, exported as `IDENTITY_COMMAND_SCHEMAS` + `IDENTITY_QUERY_SCHEMAS` bulk-registration arrays.
+   578→  - `src/application/commands/identity/auth-commands.ts` (~911 lines) — 8 auth commands + handlers (RegisterUser, VerifyEmail, Login, Logout, RefreshSession, ChangePassword, RequestPasswordReset, ResetPassword).
+   579→  - `src/application/commands/identity/waitlist-commands.ts` (~232 lines) — 3 waitlist commands + handlers (ApproveUser, RejectUser, SubmitForApproval).
+   580→  - `src/application/commands/identity/user-management-commands.ts` (~635 lines) — 9 user-management commands + handlers (Suspend, Reactivate, Delete, UpdateProfile, ChangeEmail, EnableMfa, DisableMfa, AssignRole, RemoveRole).
+   581→  - `src/application/commands/identity/organization-commands.ts` (~334 lines) — 4 organization commands + handlers (Create, AddMember, RemoveMember, JoinOrganization).
+   582→  - `src/application/commands/identity/api-key-commands.ts` (~271 lines) — 3 API-key commands + handlers (Create, Rotate, Disable).
+   583→  - `src/application/commands/identity/role-commands.ts` (~313 lines) — 5 role/permission commands + handlers (CreateRole, UpdateRole, DeleteRole, CreatePermission, DeletePermission).
+   584→  - `src/application/commands/identity/index.ts` — barrel export.
+   585→  - `src/application/queries/identity/user-queries.ts` (~258 lines) — 4 user queries + handlers (GetUser, ListUsers, GetCurrentUser, GetUserPermissions).
+   586→  - `src/application/queries/identity/waitlist-queries.ts` (~97 lines) — 2 waitlist queries + handlers (ListWaitlist, GetWaitlistStats).
+   587→  - `src/application/queries/identity/organization-queries.ts` (~184 lines) — 3 organization queries + handlers (GetOrganization, ListOrganizations, GetOrganizationMembers).
+   588→  - `src/application/queries/identity/audit-queries.ts` (~111 lines) — 2 audit queries + handlers (ListAuditLog, GetAuditEntry).
+   589→  - `src/application/queries/identity/api-key-queries.ts` (~114 lines) — 2 API-key queries + handlers (ListApiKeys, GetApiKey — hash stripped from views).
+   590→  - `src/application/queries/identity/role-queries.ts` (~99 lines) — 2 role/permission queries + handlers (ListRoles, ListPermissions).
+   591→  - `src/application/queries/identity/index.ts` — barrel export.
+   592→- ~4,200 total lines of new application-layer code implementing 31 commands + 15 queries with full domain-error handling, value-object validation, optimistic-concurrency version tracking, optional audit logging (passed as `| null` so handlers don't fail when no audit repo is configured), and graceful degradation when optional services (RiskEngine, MfaProvider, BreachChecker, GeoLocationService, LoginThrottle, EmailService) are absent.
+   593→- All architectural rules respected: `import type` for type-only imports throughout, NO `any` types, NO `process.env` literals, NO Prisma outside infrastructure, NO ES2015 namespaces, NO handler registration (composition root's job).
+   594→- `bun run lint` passes (0 errors). `bun run scripts/check-architecture.ts` passes (0 violations, 226 files scanned). `bunx tsc --noEmit` passes for all new files (0 errors in `src/application/commands/identity/*` and `src/application/queries/identity/*` and `src/application/ports/identity-ports.ts`).
+   595→- NEXT (for composition root / main agent): (1) Implement the application-layer port interfaces (`AppSessionStore`, `AppJwtService`, `ApiKeyHasher`, `EmailService`, `TokenStore`, `GeoLocationService`, `LoginThrottle`, `UserReadModelStore`, `OrganizationReadModelStore`) as infrastructure adapters — most can wrap the existing `SessionStore`/`JwtService` in `src/infrastructure/sessions/session-store.ts` plus new Prisma-backed read-model stores. (2) Register all 31 command handlers + 15 query handlers with the CommandBus/QueryBus in the composition root. (3) Iterate `IDENTITY_COMMAND_SCHEMAS` + `IDENTITY_QUERY_SCHEMAS` and call `registerCommandValidator`/`registerQueryValidator` for each entry. (4) Wire projectors for `UserView` and `OrganizationView` (subscribe to identity events on the EventBus, upsert into Prisma projection tables). (5) Add API routes that dispatch these commands/queries (e.g., `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/users/:userId`, `GET /api/admin/waitlist`).
+   596→
+   597→---
+   598→Task ID: M3-4
+   599→Agent: general-purpose
+
+[showing lines 200-599 of 1042; use offset=600 with limit to continue reading]

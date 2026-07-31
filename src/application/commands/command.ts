@@ -21,6 +21,8 @@ export interface Command {
   readonly userId?: string;
   /** Additional metadata. */
   readonly metadata?: Metadata;
+  /** Optional payload (commands with typed payloads use CommandWithPayload). */
+  readonly payload?: unknown;
 }
 
 /** A command that carries a typed payload. */

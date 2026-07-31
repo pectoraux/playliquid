@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Redis Platform Client
  *

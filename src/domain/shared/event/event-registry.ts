@@ -6,10 +6,10 @@
  * event class MUST be registered at startup.
  */
 
-import { DomainEvent, type DomainEventPayload, type SerializedEvent } from './domain-event';
+import { DomainEvent, type AnyPayload, type SerializedEvent } from './domain-event';
 import { ConfigurationError } from '@/domain/shared/errors';
 
-type EventConstructor<TPayload extends DomainEventPayload = DomainEventPayload> =
+type EventConstructor<TPayload extends AnyPayload = AnyPayload> =
   new (params: {
     id?: string;
     aggregateId: string;
@@ -26,7 +26,7 @@ const registry = new Map<string, EventConstructor<any>>();
 const typeByName = new Map<string, string>();
 
 /** Register an event class. Throws if already registered. */
-export function registerEvent<TPayload extends DomainEventPayload>(
+export function registerEvent<TPayload extends AnyPayload>(
   eventType: string,
   constructor: EventConstructor<TPayload>,
 ): void {
@@ -38,7 +38,7 @@ export function registerEvent<TPayload extends DomainEventPayload>(
 }
 
 /** Register an event class, silently skipping if already registered. */
-export function registerEventSafe<TPayload extends DomainEventPayload>(
+export function registerEventSafe<TPayload extends AnyPayload>(
   eventType: string,
   constructor: EventConstructor<TPayload>,
 ): void {

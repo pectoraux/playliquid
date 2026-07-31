@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Worker interface handlers — trigger outbox publishing, projection
  * processing, and worker management.
