@@ -10,7 +10,7 @@ import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Loader2, Sparkles, ArrowRight, Clock, Trophy, Wallet, Users, Gift, Gamepad2, Palette, Rocket, BarChart3, Building2, Code2, Store, Tags, Repeat, Flag, AlertTriangle, Shield, CheckCircle, LifeBuoy, TicketCheck, DollarSign, Receipt, FileText, Activity, Radio, Database, Bell, LayoutDashboard, Boxes, ArrowUpRight, TrendingUp, Zap, Plus } from 'lucide-react';
+import { Loader2, Sparkles, ArrowRight, Clock, Trophy, Wallet, Users, Gift, Gamepad2, Palette, Rocket, BarChart3, Building2, Code2, Store, Tags, Repeat, Flag, AlertTriangle, Shield, CheckCircle, LifeBuoy, TicketCheck, DollarSign, Receipt, FileText, Activity, Radio, Database, Bell, LayoutDashboard, Boxes, ArrowUpRight, TrendingUp, Zap, Plus, Settings2 } from 'lucide-react';
 
 interface DemoResponse<T = unknown> {
   ok: boolean;
