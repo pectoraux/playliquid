@@ -1,0 +1,853 @@
+     1→/**
+     2→ * Built-in platform validation suites for the Launch & Scale program.
+     3→ *
+     4→ * Each suite is a collection of `ValidationCheck`s that verify a specific
+     5→ * aspect of the platform. The `ValidationSuiteRunner` runs them on demand
+     6→ * (or on a schedule via the scheduler) and persists the result via the
+     7→ * `ValidationRunRepository`.
+     8→ *
+     9→ * Design principles:
+    10→ *
+    11→ *   1. **Real checks, not stubs.** Every check queries the database, calls
+    12→ *      an endpoint, or exercises a real subsystem. No `passed: true`
+    13→ *      placeholders.
+    14→ *
+    15→ *   2. **Graceful degradation.** If a dependency is unavailable (e.g. an
+    16→ *      optional service wasn't wired into the DI container), the check
+    17→ *      returns `{ passed: false, message: '...' }` instead of throwing.
+    18→ *      Throwing would cause the suite runner to mark the check as failed
+    19→ *      but with a generic "threw" message; returning the explicit failure
+    20→ *      gives ops a clear action item.
+    21→ *
+    22→ *   3. **No raw env access.** Base URL for HTTP checks comes from
+    23→ *      `getEnvVar('VALIDATION_BASE_URL')` with a localhost default.
+    24→ *
+    25→ *   4. **Bounded work.** Every check has an implicit timeout via the
+    26→ *      `fetchWithTimeout` helper so a hung endpoint can't stall the
+    27→ *      whole suite.
+    28→ */
+    29→
+    30→import type { EventStore } from '@/application/ports';
+    31→import type { StorageProvider } from '@/infrastructure/storage/storage-provider';
+    32→import type { RateLimiter } from '@/infrastructure/rate-limiting/rate-limiter';
+    33→import type {
+    34→  ValidationCheck,
+    35→  ValidationCheckResult,
+    36→  ValidationSuite,
+    37→} from '@/domain/launch/services/validation-suite';
+    38→import type {
+    39→  ReconciliationSource,
+    40→} from '@/domain/launch/services/reconciliation-service';
+    41→import type {
+    42→  SessionReplayRepository,
+    43→} from '@/domain/launch/repositories';
+    44→import { ReconciliationService } from '@/domain/launch/services/reconciliation-service';
+    45→import { getClient } from '@/infrastructure/database/prisma';
+    46→import { getEnvVar } from '@/shared/config';
+    47→import { logger } from '@/shared/logging';
+    48→
+    49→/** Dependencies required by `createPlatformValidationSuites`. */
+    50→export interface ValidationSuiteDeps {
+    51→  readonly eventStore: EventStore;
+    52→  readonly reconciliationSource: ReconciliationSource;
+    53→  readonly sessionReplayRepository?: SessionReplayRepository;
+    54→  readonly storageProvider?: StorageProvider;
+    55→  readonly rateLimiter?: RateLimiter;
+    56→  /** Optional override for the HTTP base URL used by endpoint checks. */
+    57→  readonly baseUrl?: string;
+    58→}
+    59→
+    60→// ─── Helpers ────────────────────────────────────────────────────────────────
+    61→
+    62→const DEFAULT_BASE_URL = 'http://localhost:3000';
+    63→
+    64→function resolveBaseUrl(deps: ValidationSuiteDeps): string {
+    65→  if (deps.baseUrl) return deps.baseUrl;
+    66→  const fromEnv = getEnvVar('VALIDATION_BASE_URL');
+    67→  if (fromEnv) return fromEnv;
+    68→  return DEFAULT_BASE_URL;
+    69→}
+    70→
+    71→/**
+    72→ * Build a passing `ValidationCheckResult`.
+    73→ *
+    74→ * The `ValidationSuiteRunner` overwrites `durationMs` after `run()` returns
+    75→ * with the actual wall-clock duration — we just default it to 0 here so the
+    76→ * returned object satisfies the `ValidationCheckResult` interface.
+    77→ */
+    78→function pass(
+    79→  name: string,
+    80→  message: string,
+    81→  details?: Record<string, unknown>,
+    82→): ValidationCheckResult {
+    83→  return { name, passed: true, message, details, durationMs: 0 };
+    84→}
+    85→
+    86→/** Build a failing `ValidationCheckResult`. See `pass()` for the durationMs note. */
+    87→function fail(
+    88→  name: string,
+    89→  message: string,
+    90→  details?: Record<string, unknown>,
+    91→): ValidationCheckResult {
+    92→  return { name, passed: false, message, details, durationMs: 0 };
+    93→}
+    94→
+    95→/** fetch with a hard timeout so a hung endpoint can't stall the suite. */
+    96→async function fetchWithTimeout(
+    97→  url: string,
+    98→  init: RequestInit = {},
+    99→  timeoutMs = 5000,
+   100→): Promise<Response> {
+   101→  const controller = new AbortController();
+   102→  const timer = setTimeout(() => controller.abort(), timeoutMs);
+   103→  try {
+   104→    return await fetch(url, { ...init, signal: controller.signal });
+   105→  } finally {
+   106→    clearTimeout(timer);
+   107→  }
+   108→}
+   109→
+   110→// ─── 1. Event Replay Suite ──────────────────────────────────────────────────
+   111→
+   112→function buildEventReplaySuite(deps: ValidationSuiteDeps): ValidationSuite {
+   113→  const checks: ValidationCheck[] = [
+   114→    {
+   115→      name: 'wallet-replay-matches-read-model',
+   116→      description:
+   117→        'For each wallet in the read model, replay its event stream from the EventStore and verify the computed balance matches the projected balance.',
+   118→      category: 'event_replay',
+   119→      run: async () => {
+   120→        try {
+   121→          const balances = await deps.reconciliationSource.getWalletBalances();
+   122→          if (balances.length === 0) {
+   123→            return pass(
+   124→              'wallet-replay-matches-read-model',
+   125→              'No wallet read models yet — nothing to reconcile',
+   126→              { walletCount: 0 },
+   127→            );
+   128→          }
+   129→          let mismatches = 0;
+   130→          const sample = balances.slice(0, 50);
+   131→          for (const account of sample) {
+   132→            const expected = await deps.reconciliationSource.getExpectedBalance(
+   133→              account.playerId,
+   134→            );
+   135→            if (expected !== account.balance) {
+   136→              mismatches++;
+   137→            }
+   138→          }
+   139→          if (mismatches === 0) {
+   140→            return pass(
+   141→              'wallet-replay-matches-read-model',
+   142→              `All ${sample.length} sampled wallet balances match event replay`,
+   143→              { checked: sample.length, total: balances.length },
+   144→            );
+   145→          }
+   146→          return fail(
+   147→            'wallet-replay-matches-read-model',
+   148→            `${mismatches}/${sample.length} wallet balances do not match event replay`,
+   149→            { checked: sample.length, mismatches, total: balances.length },
+   150→          );
+   151→        } catch (e) {
+   152→          return fail(
+   153→            'wallet-replay-matches-read-model',
+   154→            `Wallet replay check failed: ${(e as Error).message}`,
+   155→          );
+   156→        }
+   157→      },
+   158→    },
+   159→    {
+   160→      name: 'event-store-readable',
+   161→      description:
+   162→        'Verify the event store can be replayed from position 0 with a small batch size',
+   163→      category: 'event_replay',
+   164→      run: async () => {
+   165→        try {
+   166→          const { events, nextRowId } = await deps.eventStore.replay(0, 10);
+   167→          return pass(
+   168→            'event-store-readable',
+   169→            `Event store replay returned ${events.length} events (nextRowId=${nextRowId})`,
+   170→            { count: events.length, nextRowId },
+   171→          );
+   172→        } catch (e) {
+   173→          return fail(
+   174→            'event-store-readable',
+   175→            `Event store replay failed: ${(e as Error).message}`,
+   176→          );
+   177→        }
+   178→      },
+   179→    },
+   180→  ];
+   181→
+   182→  return {
+   183→    name: 'event-replay',
+   184→    description:
+   185→      'Verifies that replaying domain events from the EventStore produces the same state as the materialized read models.',
+   186→    checks,
+   187→  };
+   188→}
+   189→
+   190→// ─── 2. Ledger Integrity Suite ──────────────────────────────────────────────
+   191→
+   192→function buildLedgerIntegritySuite(deps: ValidationSuiteDeps): ValidationSuite {
+   193→  const checks: ValidationCheck[] = [
+   194→    {
+   195→      name: 'reconciliation-balanced',
+   196→      description:
+   197→        'Run the ReconciliationService end-to-end and verify that the expected wallet totals match the actual read-model totals.',
+   198→      category: 'ledger',
+   199→      run: async () => {
+   200→        try {
+   201→          const service = new ReconciliationService(deps.reconciliationSource);
+   202→          const result = await service.reconcile(`validation-${Date.now()}`);
+   203→          if (result.status === 'balanced') {
+   204→            return pass(
+   205→              'reconciliation-balanced',
+   206→              `Ledger is balanced (${result.totalAccounts} accounts, ${result.totalTransactions} transactions)`,
+   207→              {
+   208→                totalAccounts: result.totalAccounts,
+   209→                matchedAccounts: result.matchedAccounts,
+   210→                totalTransactions: result.totalTransactions,
+   211→                durationMs: result.durationMs,
+   212→              },
+   213→            );
+   214→          }
+   215→          return fail(
+   216→            'reconciliation-balanced',
+   217→            `Ledger has ${result.unmatchedAccounts} unmatched account(s) and ${result.details.errors.length} error(s)`,
+   218→            {
+   219→              status: result.status,
+   220→              unmatchedAccounts: result.unmatchedAccounts,
+   221→              errors: result.details.errors,
+   222→              firstUnmatched: result.details.unmatchedAccounts.slice(0, 5),
+   223→            },
+   224→          );
+   225→        } catch (e) {
+   226→          return fail(
+   227→            'reconciliation-balanced',
+   228→            `Reconciliation failed: ${(e as Error).message}`,
+   229→          );
+   230→        }
+   231→      },
+   232→    },
+   233→    {
+   234→      name: 'transaction-count-positive',
+   235→      description:
+   236→        'Verify that the reconciliation source can report a non-negative transaction count (a sanity check on the event store cursor scan).',
+   237→      category: 'ledger',
+   238→      run: async () => {
+   239→        try {
+   240→          const count = await deps.reconciliationSource.getTransactionCount();
+   241→          if (count < 0) {
+   242→            return fail(
+   243→              'transaction-count-positive',
+   244→              `Transaction count is negative: ${count}`,
+   245→            );
+   246→          }
+   247→          return pass(
+   248→            'transaction-count-positive',
+   249→            `Transaction count is ${count}`,
+   250→            { count },
+   251→          );
+   252→        } catch (e) {
+   253→          return fail(
+   254→            'transaction-count-positive',
+   255→            `Failed to get transaction count: ${(e as Error).message}`,
+   256→          );
+   257→        }
+   258→      },
+   259→    },
+   260→  ];
+   261→
+   262→  return {
+   263→    name: 'ledger-integrity',
+   264→    description:
+   265→      'Runs the ReconciliationService and checks for any ledger discrepancies between the event-sourced truth and the wallet read models.',
+   266→    checks,
+   267→  };
+   268→}
+   269→
+   270→// ─── 3. AI Quality Suite ────────────────────────────────────────────────────
+   271→
+   272→function buildAiQualitySuite(deps: ValidationSuiteDeps): ValidationSuite {
+   273→  const baseUrl = resolveBaseUrl(deps);
+   274→  const checks: ValidationCheck[] = [
+   275→    {
+   276→      name: 'ai-health-endpoint-responds',
+   277→      description: `Ping ${baseUrl}/api/health and verify the platform (which includes the AI subsystem) reports a healthy status.`,
+   278→      category: 'ai',
+   279→      run: async () => {
+   280→        try {
+   281→          const response = await fetchWithTimeout(`${baseUrl}/api/health`);
+   282→          if (!response.ok) {
+   283→            return fail(
+   284→              'ai-health-endpoint-responds',
+   285→              `Health endpoint returned HTTP ${response.status}`,
+   286→            );
+   287→          }
+   288→          const body: unknown = await response.json().catch(() => ({}));
+   289→          const status = (body as { status?: string } | null)?.status;
+   290→          if (status && status !== 'ok' && status !== 'healthy') {
+   291→            return fail(
+   292→              'ai-health-endpoint-responds',
+   293→              `Health endpoint reported status '${status}'`,
+   294→            );
+   295→          }
+   296→          return pass(
+   297→            'ai-health-endpoint-responds',
+   298→            'Platform health endpoint is responsive',
+   299→            { httpStatus: response.status, status: status ?? 'unknown' },
+   300→          );
+   301→        } catch (e) {
+   302→          return fail(
+   303→            'ai-health-endpoint-responds',
+   304→            `Health endpoint unreachable: ${(e as Error).message}`,
+   305→          );
+   306→        }
+   307→      },
+   308→    },
+   309→    {
+   310→      name: 'ai-generation-endpoint-reachable',
+   311→      description: `POST ${baseUrl}/api/ai/generate with a minimal payload and verify the AI subsystem responds (success or a structured error).`,
+   312→      category: 'ai',
+   313→      run: async () => {
+   314→        try {
+   315→          const response = await fetchWithTimeout(
+   316→            `${baseUrl}/api/ai/generate`,
+   317→            {
+   318→              method: 'POST',
+   319→              headers: { 'content-type': 'application/json' },
+   320→              body: JSON.stringify({ prompt: 'validation ping', model: 'test' }),
+   321→            },
+   322→            10000,
+   323→          );
+   324→          // 200-299 = success; 400/401/403 = endpoint exists but rejected
+   325→          // our minimal payload (still passes the check); 404/500 = real failure.
+   326→          if (response.status >= 500) {
+   327→            return fail(
+   328→              'ai-generation-endpoint-reachable',
+   329→              `AI generation endpoint returned HTTP ${response.status}`,
+   330→            );
+   331→          }
+   332→          if (response.status === 404) {
+   333→            return fail(
+   334→              'ai-generation-endpoint-reachable',
+   335→              'AI generation endpoint does not exist (404)',
+   336→            );
+   337→          }
+   338→          return pass(
+   339→            'ai-generation-endpoint-reachable',
+   340→            `AI generation endpoint is reachable (HTTP ${response.status})`,
+   341→            { httpStatus: response.status },
+   342→          );
+   343→        } catch (e) {
+   344→          return fail(
+   345→            'ai-generation-endpoint-reachable',
+   346→            `AI generation endpoint unreachable: ${(e as Error).message}`,
+   347→          );
+   348→        }
+   349→      },
+   350→    },
+   351→  ];
+   352→
+   353→  return {
+   354→    name: 'ai-quality',
+   355→    description:
+   356→      'Verifies that the AI generation endpoints respond to requests and produce structured output (success or a clean client error).',
+   357→    checks,
+   358→  };
+   359→}
+   360→
+   361→// ─── 4. Security Suite ──────────────────────────────────────────────────────
+   362→
+   363→function buildSecuritySuite(deps: ValidationSuiteDeps): ValidationSuite {
+   364→  const baseUrl = resolveBaseUrl(deps);
+   365→  const checks: ValidationCheck[] = [
+   366→    {
+   367→      name: 'auth-rejects-invalid-credentials',
+   368→      description: `POST ${baseUrl}/api/auth/login with invalid credentials and verify the endpoint rejects with 401/400 (not 200 or 500).`,
+   369→      category: 'security',
+   370→      run: async () => {
+   371→        try {
+   372→          const response = await fetchWithTimeout(
+   373→            `${baseUrl}/api/auth/login`,
+   374→            {
+   375→              method: 'POST',
+   376→              headers: { 'content-type': 'application/json' },
+   377→              body: JSON.stringify({
+   378→                email: 'invalid-validation@example.com',
+   379→                password: 'definitely-not-a-real-password-12345',
+   380→              }),
+   381→            },
+   382→          );
+   383→          // 401/400 = expected rejection; 200 = leak; 500 = unhandled error.
+   384→          if (response.status === 200) {
+   385→            return fail(
+   386→              'auth-rejects-invalid-credentials',
+   387→              'Auth endpoint returned 200 for invalid credentials — security risk',
+   388→            );
+   389→          }
+   390→          if (response.status >= 500) {
+   391→            return fail(
+   392→              'auth-rejects-invalid-credentials',
+   393→              `Auth endpoint threw HTTP ${response.status} on invalid credentials`,
+   394→            );
+   395→          }
+   396→          return pass(
+   397→            'auth-rejects-invalid-credentials',
+   398→            `Auth endpoint correctly rejected invalid credentials (HTTP ${response.status})`,
+   399→            { httpStatus: response.status },
+   400→          );
+   401→        } catch (e) {
+   402→          return fail(
+   403→            'auth-rejects-invalid-credentials',
+   404→            `Auth endpoint unreachable: ${(e as Error).message}`,
+   405→          );
+   406→        }
+   407→      },
+   408→    },
+   409→    {
+   410→      name: 'rate-limiter-functional',
+   411→      description:
+   412→        'Verify the RateLimiter is wired and functional by checking that a burst of identical requests gets throttled.',
+   413→      category: 'security',
+   414→      run: async () => {
+   415→        if (!deps.rateLimiter) {
+   416→          return fail(
+   417→            'rate-limiter-functional',
+   418→            'RateLimiter dependency is not wired into validation suite',
+   419→          );
+   420→        }
+   421→        try {
+   422→          const opts = {
+   423→            dimension: 'ip' as const,
+   424→            algorithm: 'sliding-window' as const,
+   425→            limit: 2,
+   426→            windowSeconds: 60,
+   427→          };
+   428→          // First two should be allowed, third should be throttled.
+   429→          const identifier = `validation-${Date.now()}`;
+   430→          const r1 = await deps.rateLimiter.limit(identifier, opts);
+   431→          const r2 = await deps.rateLimiter.limit(identifier, opts);
+   432→          const r3 = await deps.rateLimiter.limit(identifier, opts);
+   433→          if (!r1.allowed || !r2.allowed) {
+   434→            return fail(
+   435→              'rate-limiter-functional',
+   436→              'RateLimiter rejected initial requests — configuration error',
+   437→            );
+   438→          }
+   439→          if (r3.allowed) {
+   440→            return fail(
+   441→              'rate-limiter-functional',
+   442→              'RateLimiter failed to throttle the 3rd request in a 2-per-minute window',
+   443→            );
+   444→          }
+   445→          return pass(
+   446→            'rate-limiter-functional',
+   447→            'RateLimiter correctly throttled the burst',
+   448→            { firstAllowed: r1.allowed, thirdAllowed: r3.allowed },
+   449→          );
+   450→        } catch (e) {
+   451→          return fail(
+   452→            'rate-limiter-functional',
+   453→            `RateLimiter check failed: ${(e as Error).message}`,
+   454→          );
+   455→        }
+   456→      },
+   457→    },
+   458→  ];
+   459→
+   460→  return {
+   461→    name: 'security',
+   462→    description:
+   463→      'Checks that auth endpoints reject invalid credentials and that the rate limiter is functional and properly throttles bursts.',
+   464→    checks,
+   465→  };
+   466→}
+   467→
+   468→// ─── 5. Extension Runtime Suite ─────────────────────────────────────────────
+   469→
+   470→function buildExtensionRuntimeSuite(deps: ValidationSuiteDeps): ValidationSuite {
+   471→  const checks: ValidationCheck[] = [
+   472→    {
+   473→      name: 'projection-engine-can-replay',
+   474→      description:
+   475→        'Since the dedicated Extension Runtime is not yet wired, this check verifies the platform projection engine can replay events (the foundational capability the extension runtime will build on).',
+   476→      category: 'extension',
+   477→      run: async () => {
+   478→        try {
+   479→          const { events } = await deps.eventStore.replay(0, 1);
+   480→          // The projection engine is exercised indirectly: if we can read
+   481→          // events from the store, the projection worker can pick them up.
+   482→          // A more thorough check would call ProjectionEngine.rebuild()
+   483→          // directly, but that requires the projector registry to be wired
+   484→          // — we keep the check self-contained here.
+   485→          if (events.length === 0) {
+   486→            return pass(
+   487→              'projection-engine-can-replay',
+   488→              'Event store is empty — projection engine has nothing to replay yet (extension runtime will work once events flow)',
+   489→            );
+   490→          }
+   491→          return pass(
+   492→            'projection-engine-can-replay',
+   493→            `Event store has ${events.length}+ events available for projection replay`,
+   494→            { firstEventType: events[0]?.eventType },
+   495→          );
+   496→        } catch (e) {
+   497→          return fail(
+   498→            'projection-engine-can-replay',
+   499→            `Event store unreadable: ${(e as Error).message}`,
+   500→          );
+   501→        }
+   502→      },
+   503→    },
+   504→    {
+   505→      name: 'extension-runtime-status',
+   506→      description:
+   507→        'Verify whether the Extension Runtime subsystem is registered and ready to load + execute extensions. Currently a stub — returns passed:false with an actionable message until the runtime ships.',
+   508→      category: 'extension',
+   509→      run: async () => {
+   510→        // The Extension Runtime is not yet built as a separate subsystem.
+   511→        // We surface this as a known-gap failure rather than a silent pass
+   512→        // so the launch dashboard tracks it as an outstanding item.
+   513→        return fail(
+   514→          'extension-runtime-status',
+   515→          'Extension Runtime is not yet registered. Build the runtime adapter and re-wire this check.',
+   516→          { reason: 'extension_runtime_not_implemented' },
+   517→        );
+   518→      },
+   519→    },
+   520→  ];
+   521→
+   522→  return {
+   523→    name: 'extension-runtime',
+   524→    description:
+   525→      "Checks that the extension runtime can load and execute a simple extension. Currently verifies the event store (the runtime's input) and tracks the runtime itself as a known gap.",
+   526→    checks,
+   527→  };
+   528→}
+   529→
+   530→// ─── 6. Session Replay Suite ────────────────────────────────────────────────
+   531→
+   532→function buildSessionReplaySuite(deps: ValidationSuiteDeps): ValidationSuite {
+   533→  const checks: ValidationCheck[] = [
+   534→    {
+   535→      name: 'session-replay-repository-readable',
+   536→      description:
+   537→        'Verify the SessionReplayRepository can list recent replays (returns an empty list if no replays exist yet, which still counts as a pass).',
+   538→      category: 'session',
+   539→      run: async () => {
+   540→        if (!deps.sessionReplayRepository) {
+   541→          return fail(
+   542→            'session-replay-repository-readable',
+   543→            'SessionReplayRepository dependency is not wired',
+   544→          );
+   545→        }
+   546→        try {
+   547→          const result = await deps.sessionReplayRepository.list({ limit: 10 });
+   548→          return pass(
+   549→            'session-replay-repository-readable',
+   550→            `SessionReplayRepository returned ${result.items.length} recent replays (total ${result.total})`,
+   551→            { count: result.items.length, total: result.total },
+   552→          );
+   553→        } catch (e) {
+   554→          return fail(
+   555→            'session-replay-repository-readable',
+   556→            `SessionReplayRepository list failed: ${(e as Error).message}`,
+   557→          );
+   558→        }
+   559→      },
+   560→    },
+   561→    {
+   562→      name: 'session-replay-storage-key-valid',
+   563→      description:
+   564→        'For the most recent session replays, verify that the storageKey is a non-empty string. (Full playback verification requires the StorageProvider — covered by the next check.)',
+   565→      category: 'session',
+   566→      run: async () => {
+   567→        if (!deps.sessionReplayRepository) {
+   568→          return fail(
+   569→            'session-replay-storage-key-valid',
+   570→            'SessionReplayRepository dependency is not wired',
+   571→          );
+   572→        }
+   573→        try {
+   574→          const result = await deps.sessionReplayRepository.list({ limit: 5 });
+   575→          if (result.items.length === 0) {
+   576→            return pass(
+   577→              'session-replay-storage-key-valid',
+   578→              'No session replays yet — nothing to validate',
+   579→            );
+   580→          }
+   581→          const invalid = result.items.filter(
+   582→            (r) => !r.storageKey || r.storageKey.trim().length === 0,
+   583→          );
+   584→          if (invalid.length > 0) {
+   585→            return fail(
+   586→              'session-replay-storage-key-valid',
+   587→              `${invalid.length} replays have an empty storageKey`,
+   588→              { invalidIds: invalid.map((r) => r.id) },
+   589→            );
+   590→          }
+   591→          return pass(
+   592→            'session-replay-storage-key-valid',
+   593→            `All ${result.items.length} sampled replays have valid storage keys`,
+   594→          );
+   595→        } catch (e) {
+   596→          return fail(
+   597→            'session-replay-storage-key-valid',
+   598→            `Storage key check failed: ${(e as Error).message}`,
+   599→          );
+   600→        }
+   601→      },
+   602→    },
+   603→    {
+   604→      name: 'session-replay-storage-provider-wired',
+   605→      description:
+   606→        'Verify the StorageProvider (which backs session-replay playback) is wired into the validation suite dependencies.',
+   607→      category: 'session',
+   608→      run: async () => {
+   609→        if (!deps.storageProvider) {
+   610→          return fail(
+   611→            'session-replay-storage-provider-wired',
+   612→            'StorageProvider dependency is not wired — replays cannot be played back',
+   613→          );
+   614→        }
+   615→        try {
+   616→          // Round-trip a tiny object to confirm the storage backend works.
+   617→          const testKey = `validation/${Date.now()}.txt`;
+   618→          const testBucket = 'validation';
+   619→          const testPayload = Buffer.from('playliquid-validation-ping', 'utf8');
+   620→          await deps.storageProvider.upload(testBucket, testKey, testPayload, {
+   621→            contentType: 'text/plain',
+   622→          });
+   623→          const exists = await deps.storageProvider.exists(testBucket, testKey);
+   624→          if (exists) {
+   625→            await deps.storageProvider.delete(testBucket, testKey).catch(() => {});
+   626→            return pass(
+   627→              'session-replay-storage-provider-wired',
+   628→              'StorageProvider round-trip succeeded — replays can be played back',
+   629→            );
+   630→          }
+   631→          return fail(
+   632→            'session-replay-storage-provider-wired',
+   633→            'StorageProvider upload succeeded but exists() returned false',
+   634→          );
+   635→        } catch (e) {
+   636→          return fail(
+   637→            'session-replay-storage-provider-wired',
+   638→            `StorageProvider round-trip failed: ${(e as Error).message}`,
+   639→          );
+   640→        }
+   641→      },
+   642→    },
+   643→  ];
+   644→
+   645→  return {
+   646→    name: 'session-replay',
+   647→    description:
+   648→      'Checks that session replays can be loaded from the repository and played back via the StorageProvider.',
+   649→    checks,
+   650→  };
+   651→}
+   652→
+   653→// ─── 7. Data Integrity Suite ────────────────────────────────────────────────
+   654→
+   655→function buildDataIntegritySuite(): ValidationSuite {
+   656→  const checks: ValidationCheck[] = [
+   657→    {
+   658→      name: 'no-orphaned-wallet-read-models',
+   659→      description:
+   660→        'Verify every WalletReadModel row has at least one corresponding event in the event store (no orphaned projections).',
+   661→      category: 'data_integrity',
+   662→      run: async () => {
+   663→        try {
+   664→          const client = getClient();
+   665→          const wallets = await client.walletReadModel.findMany({
+   666→            select: { playerId: true },
+   667→            take: 100,
+   668→          });
+   669→          if (wallets.length === 0) {
+   670→            return pass(
+   671→              'no-orphaned-wallet-read-models',
+   672→              'No wallet read models — nothing to check',
+   673→            );
+   674→          }
+   675→          // Look for any event stream for this player by checking the
+   676→          // event store for any event whose aggregateId === playerId.
+   677→          // We do this in one batched query for efficiency.
+   678→          const playerIds = wallets.map(
+   679→            (w: { playerId: string }) => w.playerId,
+   680→          );
+   681→          const orphans: string[] = [];
+   682→          for (const playerId of playerIds.slice(0, 25)) {
+   683→            const count = await client.eventRecord.count({
+   684→              where: { aggregateId: playerId },
+   685→            });
+   686→            if (count === 0) orphans.push(playerId);
+   687→          }
+   688→          if (orphans.length === 0) {
+   689→            return pass(
+   690→              'no-orphaned-wallet-read-models',
+   691→              `All ${Math.min(playerIds.length, 25)} sampled wallet read models have backing events`,
+   692→              { checked: Math.min(playerIds.length, 25) },
+   693→            );
+   694→          }
+   695→          return fail(
+   696→            'no-orphaned-wallet-read-models',
+   697→            `${orphans.length} wallet read models have no backing events`,
+   698→            { orphanedPlayerIds: orphans.slice(0, 10) },
+   699→          );
+   700→        } catch (e) {
+   701→          return fail(
+   702→            'no-orphaned-wallet-read-models',
+   703→            `Orphan check failed: ${(e as Error).message}`,
+   704→          );
+   705→        }
+   706→      },
+   707→    },
+   708→    {
+   709→      name: 'no-stuck-outbox-messages',
+   710→      description:
+   711→        'Verify the outbox has no messages stuck in a failed state (failed status with no remaining retries).',
+   712→      category: 'data_integrity',
+   713→      run: async () => {
+   714→        try {
+   715→          const client = getClient();
+   716→          const stuck = await client.outboxMessage.count({
+   717→            where: {
+   718→              status: 'failed',
+   719→              retryCount: { gte: 5 },
+   720→            },
+   721→          });
+   722→          if (stuck === 0) {
+   723→            return pass(
+   724→              'no-stuck-outbox-messages',
+   725→              'No outbox messages are stuck in failed state',
+   726→            );
+   727→          }
+   728→          return fail(
+   729→            'no-stuck-outbox-messages',
+   730→            `${stuck} outbox messages are stuck (failed, max retries reached)`,
+   731→            { stuckCount: stuck },
+   732→          );
+   733→        } catch (e) {
+   734→          return fail(
+   735→            'no-stuck-outbox-messages',
+   736→            `Outbox check failed: ${(e as Error).message}`,
+   737→          );
+   738→        }
+   739→      },
+   740→    },
+   741→    {
+   742→      name: 'projection-checkpoints-progressing',
+   743→      description:
+   744→        "Verify at least one projection checkpoint exists (i.e. the projection engine has processed events). A missing checkpoint indicates the projection worker hasn't started.",
+   745→      category: 'data_integrity',
+   746→      run: async () => {
+   747→        try {
+   748→          const client = getClient();
+   749→          const checkpoints = await client.projectionCheckpoint.count();
+   750→          if (checkpoints === 0) {
+   751→            return fail(
+   752→              'projection-checkpoints-progressing',
+   753→              'No projection checkpoints found — projection worker may not be running',
+   754→            );
+   755→          }
+   756→          return pass(
+   757→            'projection-checkpoints-progressing',
+   758→            `${checkpoints} projection checkpoint(s) registered`,
+   759→            { count: checkpoints },
+   760→          );
+   761→        } catch (e) {
+   762→          return fail(
+   763→            'projection-checkpoints-progressing',
+   764→            `Checkpoint check failed: ${(e as Error).message}`,
+   765→          );
+   766→        }
+   767→      },
+   768→    },
+   769→    {
+   770→      name: 'no-duplicate-event-ids',
+   771→      description:
+   772→        'Verify the event store has no duplicate eventId values (a safety net for the unique constraint).',
+   773→      category: 'data_integrity',
+   774→      run: async () => {
+   775→        try {
+   776→          const client = getClient();
+   777→          // SQLite + Prisma: groupBy with having requires orderBy when take
+   778→          // is supplied. We omit `take` and rely on the having clause to
+   779→          // narrow the result to dupes only — for a launch-size event store
+   780→          // the dupes set is tiny.
+   781→          const dupes = await client.eventRecord.groupBy({
+   782→            by: ['eventId'],
+   783→            _count: { _all: true },
+   784→            having: { eventId: { _count: { gt: 1 } } },
+   785→          });
+   786→          if (dupes.length === 0) {
+   787→            return pass(
+   788→              'no-duplicate-event-ids',
+   789→              'No duplicate eventIds in the event store',
+   790→            );
+   791→          }
+   792→          return fail(
+   793→            'no-duplicate-event-ids',
+   794→            `${dupes.length} duplicate eventId(s) detected`,
+   795→            { duplicateEventIds: dupes.map((d) => d.eventId) },
+   796→          );
+   797→        } catch (e) {
+   798→          return fail(
+   799→            'no-duplicate-event-ids',
+   800→            `Duplicate check failed: ${(e as Error).message}`,
+   801→          );
+   802→        }
+   803→      },
+   804→    },
+   805→  ];
+   806→
+   807→  return {
+   808→    name: 'data-integrity',
+   809→    description:
+   810→      'Checks for orphaned records, stuck outbox messages, missing projection checkpoints, and duplicate event IDs.',
+   811→    checks,
+   812→  };
+   813→}
+   814→
+   815→// ─── Public Factory ─────────────────────────────────────────────────────────
+   816→
+   817→/**
+   818→ * Build the full set of platform validation suites.
+   819→ *
+   820→ * Returns 7 suites:
+   821→ *   1. event-replay        — event replay matches read models
+   822→ *   2. ledger-integrity    — reconciliation passes
+   823→ *   3. ai-quality          — AI endpoints respond
+   824→ *   4. security            — auth rejects bad creds + rate limiter works
+   825→ *   5. extension-runtime   — extension runtime is wired (currently a known gap)
+   826→ *   6. session-replay      — session replays can be loaded + played
+   827→ *   7. data-integrity      — no orphaned/stuck/duplicate records
+   828→ *
+   829→ * Suites whose dependencies are missing still get registered — their
+   830→ * checks return `passed: false` with a clear actionable message rather
+   831→ * than throwing, so the launch dashboard surfaces the gap.
+   832→ */
+   833→export function createPlatformValidationSuites(
+   834→  deps: ValidationSuiteDeps,
+   835→): ValidationSuite[] {
+   836→  logger.system().info('Building platform validation suites', {
+   837→    baseUrl: resolveBaseUrl(deps),
+   838→    hasRateLimiter: !!deps.rateLimiter,
+   839→    hasStorageProvider: !!deps.storageProvider,
+   840→    hasSessionReplayRepository: !!deps.sessionReplayRepository,
+   841→  });
+   842→
+   843→  return [
+   844→    buildEventReplaySuite(deps),
+   845→    buildLedgerIntegritySuite(deps),
+   846→    buildAiQualitySuite(deps),
+   847→    buildSecuritySuite(deps),
+   848→    buildExtensionRuntimeSuite(deps),
+   849→    buildSessionReplaySuite(deps),
+   850→    buildDataIntegritySuite(),
+   851→  ];
+   852→}
+   853→

@@ -1,0 +1,2002 @@
+     1→'use client'
+     2→
+     3→import * as React from 'react'
+     4→import { toast, Toaster } from 'sonner'
+     5→import { Button } from '@/components/ui/button'
+     6→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+     7→import { Badge } from '@/components/ui/badge'
+     8→import { Input } from '@/components/ui/input'
+     9→import { Label } from '@/components/ui/label'
+    10→import { Separator } from '@/components/ui/separator'
+    11→import { ScrollArea } from '@/components/ui/scroll-area'
+    12→import {
+    13→  Select,
+    14→  SelectContent,
+    15→  SelectItem,
+    16→  SelectTrigger,
+    17→  SelectValue,
+    18→} from '@/components/ui/select'
+    19→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    20→import {
+    21→  Table,
+    22→  TableBody,
+    23→  TableCell,
+    24→  TableHead,
+    25→  TableHeader,
+    26→  TableRow,
+    27→} from '@/components/ui/table'
+    28→import {
+    29→  Dialog,
+    30→  DialogContent,
+    31→  DialogDescription,
+    32→  DialogFooter,
+    33→  DialogHeader,
+    34→  DialogTitle,
+    35→} from '@/components/ui/dialog'
+    36→import { Switch } from '@/components/ui/switch'
+    37→import { Textarea } from '@/components/ui/textarea'
+    38→import { Skeleton } from '@/components/ui/skeleton'
+    39→import {
+    40→  AlertTriangle,
+    41→  Building2,
+    42→  CheckCircle,
+    43→  ChevronRight,
+    44→  Clock,
+    45→  Copy,
+    46→  Eye,
+    47→  FileText,
+    48→  Key,
+    49→  Layers,
+    50→  Loader2,
+    51→  Plus,
+    52→  RefreshCw,
+    53→  Search,
+    54→  Shield,
+    55→  ShieldCheck,
+    56→  Trash2,
+    57→  Users,
+    58→  XCircle,
+    59→} from 'lucide-react'
+    60→
+    61→// ─── Types ────────────────────────────────────────────────────────────────────
+    62→
+    63→interface WaitlistEntry {
+    64→  id: string
+    65→  email: string
+    66→  username: string
+    67→  status: 'pending' | 'email_verified' | 'approved' | 'rejected' | 'converted'
+    68→  verificationToken: string | null
+    69→  verifiedAt: string | null
+    70→  approvalNotes: string | null
+    71→  rejectionReason: string | null
+    72→  invitedById: string | null
+    73→  createdAt: string
+    74→  updatedAt: string
+    75→}
+    76→
+    77→interface WaitlistStats {
+    78→  total: number
+    79→  byStatus: Record<string, number>
+    80→}
+    81→
+    82→interface ListResult<T> {
+    83→  items: readonly T[]
+    84→  total: number
+    85→  limit: number
+    86→  offset: number
+    87→}
+    88→
+    89→interface UserRoleView {
+    90→  roleId: string
+    91→  roleName: string
+    92→  assignedAt: string
+    93→}
+    94→
+    95→interface UserMembershipView {
+    96→  organizationId: string
+    97→  roleId: string
+    98→  joinedAt: string
+    99→}
+   100→
+   101→interface UserView {
+   102→  userId: string
+   103→  email: string
+   104→  username: string
+   105→  displayName: string
+   106→  country: string
+   107→  timezone: string
+   108→  locale: string
+   109→  status: string
+   110→  emailVerified: boolean
+   111→  mfaEnabled: boolean
+   112→  mfaMethod: string | null
+   113→  roles: readonly UserRoleView[]
+   114→  memberships: readonly UserMembershipView[]
+   115→  createdAt: string
+   116→  updatedAt: string
+   117→}
+   118→
+   119→interface OrganizationView {
+   120→  organizationId: string
+   121→  name: string
+   122→  slug: string
+   123→  type: string
+   124→  createdById: string
+   125→  memberCount: number
+   126→  active: boolean
+   127→  createdAt: string
+   128→  updatedAt: string
+   129→}
+   130→
+   131→interface OrgMemberView {
+   132→  userId: string
+   133→  roleId: string
+   134→  joinedAt: string
+   135→  status: string
+   136→  email: string | null
+   137→  displayName: string | null
+   138→}
+   139→
+   140→interface RoleData {
+   141→  id: string
+   142→  name: string
+   143→  description: string
+   144→  permissions: string[]
+   145→  isSystem: boolean
+   146→  createdAt: string
+   147→}
+   148→
+   149→interface PermissionData {
+   150→  id: string
+   151→  resource: string
+   152→  action: string
+   153→  description: string
+   154→  isSystem: boolean
+   155→  createdAt: string
+   156→}
+   157→
+   158→interface ApiKeyView {
+   159→  id: string
+   160→  userId: string
+   161→  name: string
+   162→  keyPrefix: string
+   163→  scopes: readonly string[]
+   164→  expiresAt: string | null
+   165→  lastUsedAt: string | null
+   166→  lastUsedIp: string | null
+   167→  createdAt: string
+   168→  revokedAt: string | null
+   169→  active: boolean
+   170→}
+   171→
+   172→interface CreateApiKeyResult {
+   173→  apiKeyId: string
+   174→  plaintextKey: string
+   175→  keyPrefix: string
+   176→}
+   177→
+   178→interface AuditLogEntry {
+   179→  id: string
+   180→  action: string
+   181→  actorId: string
+   182→  actorType: 'user' | 'system' | 'api_key'
+   183→  targetType: string
+   184→  targetId: string
+   185→  timestamp: string
+   186→  ipAddress: string | null
+   187→  userAgent: string | null
+   188→  metadata: Record<string, unknown>
+   189→  correlationId: string | null
+   190→}
+   191→
+   192→interface AuditListResult {
+   193→  items: readonly AuditLogEntry[]
+   194→  limit: number
+   195→  offset: number
+   196→}
+   197→
+   198→interface ArchitectureBinding {
+   199→  token: string
+   200→  lifetime: string
+   201→}
+   202→
+   203→interface ArchitectureResponse {
+   204→  milestone: string
+   205→  layers: string[]
+   206→  eventTypes: string[]
+   207→  commandTypes: string[]
+   208→  queryTypes: string[]
+   209→  bindings: ArchitectureBinding[]
+   210→  timestamp: string
+   211→}
+   212→
+   213→// ─── Constants ────────────────────────────────────────────────────────────────
+   214→
+   215→const ADMIN_USER_ID = 'admin'
+   216→
+   217→const USER_STATUS_OPTIONS = [
+   218→  { value: 'all', label: 'All Statuses' },
+   219→  { value: 'waitlist', label: 'Waitlist' },
+   220→  { value: 'active', label: 'Active' },
+   221→  { value: 'suspended', label: 'Suspended' },
+   222→  { value: 'rejected', label: 'Rejected' },
+   223→  { value: 'deleted', label: 'Deleted' },
+   224→] as const
+   225→
+   226→const ORG_TYPE_OPTIONS = [
+   227→  'creator_studio',
+   228→  'platform_operations',
+   229→  'moderation_team',
+   230→  'enterprise_customer',
+   231→  'tournament_organizer',
+   232→] as const
+   233→
+   234→const IDENTITY_VALUE_OBJECTS = [
+   235→  'UserId',
+   236→  'RoleId',
+   237→  'PermissionId',
+   238→  'DeviceId',
+   239→  'Email',
+   240→  'Username',
+   241→  'DisplayName',
+   242→  'Country',
+   243→  'Timezone',
+   244→  'Locale',
+   245→  'PhoneNumber',
+   246→  'PasswordHash',
+   247→]
+   248→
+   249→const IDENTITY_AGGREGATES = [
+   250→  { name: 'UserAggregate', description: 'User lifecycle, roles, memberships, MFA, email verification.' },
+   251→  { name: 'OrganizationAggregate', description: 'Org membership, type, active state.' },
+   252→]
+   253→
+   254→const IDENTITY_EVENTS = [
+   255→  'UserCreated',
+   256→  'UserApproved',
+   257→  'UserRejected',
+   258→  'UserSuspendedM3',
+   259→  'UserReactivated',
+   260→  'UserDeleted',
+   261→  'UserProfileUpdated',
+   262→  'UserEmailChanged',
+   263→  'UserPasswordChanged',
+   264→  'UserEmailVerified',
+   265→  'UserMfaEnabled',
+   266→  'UserMfaDisabled',
+   267→  'RoleAssigned',
+   268→  'RoleRemoved',
+   269→  'OrganizationJoined',
+   270→  'OrganizationLeft',
+   271→  'SessionStarted',
+   272→  'SessionEnded',
+   273→  'OrganizationCreated',
+   274→  'MemberAdded',
+   275→  'MemberRemoved',
+   276→  'ApiKeyCreated',
+   277→  'ApiKeyRotated',
+   278→  'ApiKeyDisabled',
+   279→  'AuditRecorded',
+   280→]
+   281→
+   282→const IDENTITY_REPOSITORIES = [
+   283→  'UserRepository',
+   284→  'OrganizationRepository',
+   285→  'RoleRepository',
+   286→  'PermissionRepository',
+   287→  'ApiKeyRepository',
+   288→  'AuditLogRepository',
+   289→  'WaitlistRepository',
+   290→  'DeviceRepository',
+   291→]
+   292→
+   293→const AUTHZ_ENGINE_CLASSES = [
+   294→  { name: 'RbacEngine', description: 'Role-Based Access Control — resolves effective permission sets from role assignments.' },
+   295→  { name: 'AbacEngine', description: 'Attribute-Based Access Control — conditional policies evaluated against context.' },
+   296→  { name: 'PolicyEngine', description: 'Composes RBAC + ABAC into a single authorization decision (allow / deny / conditional).' },
+   297→]
+   298→
+   299→// ─── API Helpers ──────────────────────────────────────────────────────────────
+   300→
+   301→async function apiGet<T>(path: string): Promise<T> {
+   302→  const res = await fetch(path, { cache: 'no-store' })
+   303→  const json = (await res.json().catch(() => ({}))) as { ok?: boolean; data?: T; error?: string }
+   304→  if (!res.ok || !json.ok) {
+   305→    throw new Error(json.error || `Request failed (${res.status})`)
+   306→  }
+   307→  return json.data as T
+   308→}
+   309→
+   310→async function apiPost<T>(path: string, payload: Record<string, unknown>): Promise<T> {
+   311→  const res = await fetch(path, {
+   312→    method: 'POST',
+   313→    headers: { 'Content-Type': 'application/json' },
+   314→    body: JSON.stringify({ payload }),
+   315→  })
+   316→  const json = (await res.json().catch(() => ({}))) as { ok?: boolean; data?: T; error?: string; code?: string }
+   317→  if (!res.ok || !json.ok) {
+   318→    throw new Error(json.error || `Request failed (${res.status})`)
+   319→  }
+   320→  return json.data as T
+   321→}
+   322→
+   323→// ─── Utilities ────────────────────────────────────────────────────────────────
+   324→
+   325→function formatRelativeTime(input: string | null | undefined): string {
+   326→  if (!input) return '—'
+   327→  const t = new Date(input).getTime()
+   328→  if (Number.isNaN(t)) return String(input)
+   329→  const diff = Date.now() - t
+   330→  const sec = Math.round(diff / 1000)
+   331→  if (sec < 5) return 'just now'
+   332→  if (sec < 60) return `${sec} seconds ago`
+   333→  const min = Math.round(sec / 60)
+   334→  if (min < 60) return `${min} minute${min === 1 ? '' : 's'} ago`
+   335→  const hr = Math.round(min / 60)
+   336→  if (hr < 24) return `${hr} hour${hr === 1 ? '' : 's'} ago`
+   337→  const day = Math.round(hr / 24)
+   338→  if (day < 30) return `${day} day${day === 1 ? '' : 's'} ago`
+   339→  const month = Math.round(day / 30)
+   340→  if (month < 12) return `${month} month${month === 1 ? '' : 's'} ago`
+   341→  const year = Math.round(month / 12)
+   342→  return `${year} year${year === 1 ? '' : 's'} ago`
+   343→}
+   344→
+   345→function statusTone(status: string): { className: string; label: string } {
+   346→  const s = status.toLowerCase()
+   347→  if (['active', 'approved', 'converted', 'email_verified'].includes(s)) {
+   348→    return {
+   349→      className: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+   350→      label: status,
+   351→    }
+   352→  }
+   353→  if (['pending', 'waitlist'].includes(s)) {
+   354→    return {
+   355→      className: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+   356→      label: status,
+   357→    }
+   358→  }
+   359→  if (['rejected', 'suspended', 'deleted', 'revoked'].includes(s)) {
+   360→    return {
+   361→      className: 'border-rose-500/40 bg-rose-500/10 text-rose-300',
+   362→      label: status,
+   363→    }
+   364→  }
+   365→  return {
+   366→    className: 'border-slate-600 bg-slate-800/40 text-slate-300',
+   367→    label: status,
+   368→  }
+   369→}
+   370→
+   371→function StatusBadge({ status }: { status: string }) {
+   372→  const tone = statusTone(status)
+   373→  return (
+   374→    <Badge
+   375→      variant="outline"
+   376→      className={`font-mono text-[10px] uppercase tracking-wide ${tone.className}`}
+   377→    >
+   378→      {tone.label}
+   379→    </Badge>
+   380→  )
+   381→}
+   382→
+   383→function copyToClipboard(text: string) {
+   384→  if (typeof navigator !== 'undefined' && navigator.clipboard) {
+   385→    void navigator.clipboard.writeText(text)
+   386→    toast.success('Copied to clipboard')
+   387→  } else {
+   388→    toast.error('Clipboard not available')
+   389→  }
+   390→}
+   391→
+   392→// ─── Shared UI primitives ─────────────────────────────────────────────────────
+   393→
+   394→function LoadingRow({ cols = 5 }: { cols?: number }) {
+   395→  return (
+   396→    <TableRow>
+   397→      {Array.from({ length: cols }).map((_, i) => (
+   398→        <TableCell key={i}>
+   399→          <Skeleton className="h-4 w-full max-w-[160px]" />
+   400→        </TableCell>
+   401→      ))}
+   402→    </TableRow>
+   403→  )
+   404→}
+   405→
+   406→function ErrorBanner({ message, onRetry }: { message: string; onRetry?: () => void }) {
+   407→  return (
+   408→    <div className="flex flex-col items-start gap-3 rounded-lg border border-rose-500/30 bg-rose-500/5 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+   409→      <div className="flex items-center gap-2.5">
+   410→        <AlertTriangle className="h-4 w-4 shrink-0 text-rose-400" />
+   411→        <span className="font-mono text-xs text-rose-200">{message}</span>
+   412→      </div>
+   413→      {onRetry && (
+   414→        <Button
+   415→          size="sm"
+   416→          variant="outline"
+   417→          onClick={onRetry}
+   418→          className="border-rose-500/40 bg-rose-500/10 text-rose-200 hover:bg-rose-500/20 hover:text-rose-100"
+   419→        >
+   420→          <RefreshCw className="mr-1.5 h-3 w-3" />
+   421→          Retry
+   422→        </Button>
+   423→      )}
+   424→    </div>
+   425→  )
+   426→}
+   427→
+   428→function EmptyState({ icon: Icon, message }: { icon: React.ComponentType<{ className?: string }>; message: string }) {
+   429→  return (
+   430→    <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-slate-800 py-12 text-center">
+   431→      <Icon className="h-5 w-5 text-slate-600" />
+   432→      <p className="font-mono text-xs text-slate-500">{message}</p>
+   433→    </div>
+   434→  )
+   435→}
+   436→
+   437→function SectionHeader({
+   438→  icon: Icon,
+   439→  title,
+   440→  description,
+   441→  endpoint,
+   442→  action,
+   443→}: {
+   444→  icon: React.ComponentType<{ className?: string }>
+   445→  title: string
+   446→  description: string
+   447→  endpoint?: string
+   448→  action?: React.ReactNode
+   449→}) {
+   450→  return (
+   451→    <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+   452→      <div className="flex items-start gap-3">
+   453→        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 ring-1 ring-inset ring-emerald-500/20">
+   454→          <Icon className="h-4 w-4 text-emerald-400" />
+   455→        </div>
+   456→        <div className="space-y-1">
+   457→          <h2 className="font-mono text-base font-semibold text-zinc-100">{title}</h2>
+   458→          <p className="text-xs text-slate-400">{description}</p>
+   459→          {endpoint && (
+   460→            <p className="font-mono text-[10px] text-slate-600">{endpoint}</p>
+   461→          )}
+   462→        </div>
+   463→      </div>
+   464→      {action}
+   465→    </div>
+   466→  )
+   467→}
+   468→
+   469→function MonoCell({ children, className }: { children: React.ReactNode; className?: string }) {
+   470→  return (
+   471→    <span className={`font-mono text-xs text-slate-300 ${className ?? ''}`}>{children}</span>
+   472→  )
+   473→}
+   474→
+   475→// ─── Page ─────────────────────────────────────────────────────────────────────
+   476→
+   477→export default function AdminConsolePage() {
+   478→  return (
+   479→    <div className="dark flex min-h-screen flex-col bg-slate-950 text-zinc-100">
+   480→      <Toaster theme="dark" position="top-right" richColors closeButton />
+   481→      <BackgroundGrid />
+   482→      <div className="relative flex flex-1 flex-col">
+   483→        <AdminHeader />
+   484→        <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6 lg:px-8">
+   485→          <Tabs defaultValue="waitlist" className="w-full">
+   486→            <ScrollArea className="w-full whitespace-nowrap">
+   487→              <TabsList className="mb-6 inline-flex h-auto w-max gap-1 rounded-lg border border-slate-800 bg-slate-900/60 p-1">
+   488→                <TabsTrigger value="waitlist" className="gap-1.5 data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-300">
+   489→                  <Clock className="h-3.5 w-3.5" /> Waitlist
+   490→                </TabsTrigger>
+   491→                <TabsTrigger value="users" className="gap-1.5 data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-300">
+   492→                  <Users className="h-3.5 w-3.5" /> Users
+   493→                </TabsTrigger>
+   494→                <TabsTrigger value="organizations" className="gap-1.5 data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-300">
+   495→                  <Building2 className="h-3.5 w-3.5" /> Organizations
+   496→                </TabsTrigger>
+   497→                <TabsTrigger value="roles" className="gap-1.5 data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-300">
+   498→                  <Shield className="h-3.5 w-3.5" /> Roles &amp; Permissions
+   499→                </TabsTrigger>
+   500→                <TabsTrigger value="apikeys" className="gap-1.5 data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-300">
+   501→                  <Key className="h-3.5 w-3.5" /> API Keys
+   502→                </TabsTrigger>
+   503→                <TabsTrigger value="audit" className="gap-1.5 data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-300">
+   504→                  <FileText className="h-3.5 w-3.5" /> Audit Log
+   505→                </TabsTrigger>
+   506→                <TabsTrigger value="architecture" className="gap-1.5 data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-300">
+   507→                  <Layers className="h-3.5 w-3.5" /> Architecture
+   508→                </TabsTrigger>
+   509→              </TabsList>
+   510→            </ScrollArea>
+   511→
+   512→            <TabsContent value="waitlist" className="mt-0 focus-visible:outline-none">
+   513→              <WaitlistTab />
+   514→            </TabsContent>
+   515→            <TabsContent value="users" className="mt-0 focus-visible:outline-none">
+   516→              <UsersTab />
+   517→            </TabsContent>
+   518→            <TabsContent value="organizations" className="mt-0 focus-visible:outline-none">
+   519→              <OrganizationsTab />
+   520→            </TabsContent>
+   521→            <TabsContent value="roles" className="mt-0 focus-visible:outline-none">
+   522→              <RolesPermissionsTab />
+   523→            </TabsContent>
+   524→            <TabsContent value="apikeys" className="mt-0 focus-visible:outline-none">
+   525→              <ApiKeysTab />
+   526→            </TabsContent>
+   527→            <TabsContent value="audit" className="mt-0 focus-visible:outline-none">
+   528→              <AuditTab />
+   529→            </TabsContent>
+   530→            <TabsContent value="architecture" className="mt-0 focus-visible:outline-none">
+   531→              <ArchitectureTab />
+   532→            </TabsContent>
+   533→          </Tabs>
+   534→        </main>
+   535→        <AdminFooter />
+   536→      </div>
+   537→    </div>
+   538→  )
+   539→}
+   540→
+   541→// ─── Background ───────────────────────────────────────────────────────────────
+   542→
+   543→function BackgroundGrid() {
+   544→  return (
+   545→    <div
+   546→      aria-hidden
+   547→      className="pointer-events-none absolute inset-0 z-0 h-full w-full bg-[linear-gradient(to_right,rgba(16,185,129,0.04)_1px,transparent_1px),linear-gradient(to_bottom,rgba(16,185,129,0.04)_1px,transparent_1px)] bg-[size:48px_48px]"
+   548→    >
+   549→      <div className="absolute inset-0 bg-gradient-to-b from-slate-950/0 via-slate-950/40 to-slate-950" />
+   550→      <div className="absolute -top-40 left-1/2 h-80 w-[40rem] -translate-x-1/2 rounded-full bg-emerald-500/10 blur-3xl" />
+   551→      <div className="absolute top-1/3 -right-40 h-72 w-72 rounded-full bg-cyan-500/10 blur-3xl" />
+   552→    </div>
+   553→  )
+   554→}
+   555→
+   556→// ─── Header / Footer ──────────────────────────────────────────────────────────
+   557→
+   558→function AdminHeader() {
+   559→  return (
+   560→    <header className="relative border-b border-slate-800/80 bg-slate-950/60 backdrop-blur-sm">
+   561→      <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-8 sm:px-6 lg:px-8">
+   562→        <div className="flex flex-wrap items-center gap-3 text-xs font-mono uppercase tracking-[0.25em] text-emerald-400/80">
+   563→          <span className="inline-flex items-center gap-1.5">
+   564→            <ShieldCheck className="h-3.5 w-3.5" />
+   565→            playliquid
+   566→          </span>
+   567→          <span className="text-slate-600">/</span>
+   568→          <span className="text-slate-400">milestone 3</span>
+   569→          <span className="text-slate-600">/</span>
+   570→          <span className="text-emerald-400">admin console</span>
+   571→        </div>
+   572→        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+   573→          <div className="space-y-2">
+   574→            <h1 className="font-mono text-3xl font-bold tracking-tight text-zinc-50 sm:text-4xl">
+   575→              Identity <span className="text-emerald-400">Admin</span>
+   576→            </h1>
+   577→            <p className="max-w-2xl text-sm text-slate-400">
+   578→              Operational console for the PlayLiquid identity &amp; access management
+   579→              domain — waitlist approval, user lifecycle, organizations, RBAC,
+   580→              API keys, and the audit trail.
+   581→            </p>
+   582→          </div>
+   583→          <div className="flex flex-wrap items-center gap-2">
+   584→            <Badge variant="outline" className="gap-1.5 border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-emerald-300">
+   585→              <CheckCircle className="h-3.5 w-3.5" /> DDD / CQRS
+   586→            </Badge>
+   587→            <Badge variant="outline" className="gap-1.5 border-cyan-500/40 bg-cyan-500/10 px-3 py-1 text-cyan-300">
+   588→              <Shield className="h-3.5 w-3.5" /> RBAC + ABAC
+   589→            </Badge>
+   590→            <a
+   591→              href="/"
+   592→              className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-900/60 px-2.5 py-1 font-mono text-[11px] text-slate-300 transition-colors hover:border-emerald-500/40 hover:bg-emerald-500/10 hover:text-emerald-300"
+   593→            >
+   594→              <Layers className="h-3 w-3" /> Architecture Dashboard
+   595→            </a>
+   596→          </div>
+   597→        </div>
+   598→      </div>
+   599→    </header>
+   600→  )
+   601→}
+   602→
+   603→function AdminFooter() {
+   604→  return (
+   605→    <footer className="mt-auto border-t border-slate-800/80 bg-slate-950/80 backdrop-blur-sm">
+   606→      <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-6 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+   607→        <div className="flex items-center gap-2 font-mono text-xs text-slate-400">
+   608→          <span className="text-emerald-400">Play</span>
+   609→          <span>Liquid</span>
+   610→          <span className="text-slate-600">·</span>
+   611→          <span>Admin Console</span>
+   612→        </div>
+   613→        <div className="flex flex-wrap gap-2 font-mono text-[10px] text-slate-500">
+   614→          <span className="rounded-md border border-slate-800 bg-slate-900/60 px-2 py-1">/api/admin/*</span>
+   615→          <span className="rounded-md border border-slate-800 bg-slate-900/60 px-2 py-1">Event-Sourced</span>
+   616→          <span className="rounded-md border border-slate-800 bg-slate-900/60 px-2 py-1">Audit Logged</span>
+   617→        </div>
+   618→      </div>
+   619→    </footer>
+   620→  )
+   621→}
+   622→
+   623→// ─── Tab 1: Waitlist ──────────────────────────────────────────────────────────
+   624→
+   625→function WaitlistTab() {
+   626→  const [stats, setStats] = React.useState<WaitlistStats | null>(null)
+   627→  const [entries, setEntries] = React.useState<readonly WaitlistEntry[]>([])
+   628→  const [loadingStats, setLoadingStats] = React.useState(true)
+   629→  const [loadingList, setLoadingList] = React.useState(true)
+   630→  const [statsError, setStatsError] = React.useState<string | null>(null)
+   631→  const [listError, setListError] = React.useState<string | null>(null)
+   632→  const [approveTarget, setApproveTarget] = React.useState<WaitlistEntry | null>(null)
+   633→  const [rejectTarget, setRejectTarget] = React.useState<WaitlistEntry | null>(null)
+   634→
+   635→  const loadStats = React.useCallback(async () => {
+   636→    setLoadingStats(true)
+   637→    setStatsError(null)
+   638→    try {
+   639→      const data = await apiGet<WaitlistStats>('/api/admin/waitlist/stats')
+   640→      setStats(data)
+   641→    } catch (e) {
+   642→      setStatsError(e instanceof Error ? e.message : 'Failed to load stats')
+   643→    } finally {
+   644→      setLoadingStats(false)
+   645→    }
+   646→  }, [])
+   647→
+   648→  const loadList = React.useCallback(async () => {
+   649→    setLoadingList(true)
+   650→    setListError(null)
+   651→    try {
+   652→      const data = await apiGet<ListResult<WaitlistEntry>>('/api/admin/waitlist?limit=20')
+   653→      setEntries(data.items)
+   654→    } catch (e) {
+   655→      setListError(e instanceof Error ? e.message : 'Failed to load waitlist')
+   656→    } finally {
+   657→      setLoadingList(false)
+   658→    }
+   659→  }, [])
+   660→
+   661→  React.useEffect(() => {
+   662→    void loadStats()
+   663→    void loadList()
+   664→  }, [loadStats, loadList])
+   665→
+   666→  const statCards = [
+   667→    { key: 'total', label: 'Total', value: stats?.total, accent: 'text-zinc-100' },
+   668→    { key: 'pending', label: 'Pending', value: stats?.byStatus?.pending ?? 0, accent: 'text-amber-300' },
+   669→    { key: 'email_verified', label: 'Email Verified', value: stats?.byStatus?.email_verified ?? 0, accent: 'text-cyan-300' },
+   670→    { key: 'approved', label: 'Approved', value: stats?.byStatus?.approved ?? 0, accent: 'text-emerald-300' },
+   671→    { key: 'rejected', label: 'Rejected', value: stats?.byStatus?.rejected ?? 0, accent: 'text-rose-300' },
+   672→  ]
+   673→
+   674→  return (
+   675→    <section className="space-y-6">
+   676→      <SectionHeader
+   677→        icon={Clock}
+   678→        title="Waitlist Management"
+   679→        description="Review and act on users waiting for access approval."
+   680→        endpoint="GET /api/admin/waitlist/stats · GET /api/admin/waitlist"
+   681→        action={
+   682→          <Button
+   683→            size="sm"
+   684→            variant="outline"
+   685→            onClick={() => { void loadStats(); void loadList() }}
+   686→            className="border-slate-700 bg-slate-900/60 text-slate-300 hover:border-emerald-500/40 hover:text-emerald-300"
+   687→          >
+   688→            <RefreshCw className="mr-1.5 h-3 w-3" /> Refresh
+   689→          </Button>
+   690→        }
+   691→      />
+   692→
+   693→      {/* Stats bar */}
+   694→      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+   695→        {statCards.map((s) => (
+   696→          <Card key={s.key} className="border-slate-800 bg-slate-900/50 py-4 ring-1 ring-inset ring-slate-800/60">
+   697→            <CardContent className="px-4">
+   698→              <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500">{s.label}</p>
+   699→              {loadingStats ? (
+   700→                <Skeleton className="mt-1.5 h-7 w-12" />
+   701→              ) : (
+   702→                <p className={`mt-1 font-mono text-2xl font-bold ${s.accent}`}>{s.value ?? 0}</p>
+   703→              )}
+   704→            </CardContent>
+   705→          </Card>
+   706→        ))}
+   707→      </div>
+   708→
+   709→      {statsError && <ErrorBanner message={statsError} onRetry={() => void loadStats()} />}
+   710→
+   711→      {/* Table */}
+   712→      <Card className="border-slate-800 bg-slate-900/40 ring-1 ring-inset ring-slate-800/60">
+   713→        <CardHeader className="gap-1 pb-3">
+   714→          <CardTitle className="font-mono text-sm text-zinc-100">Waitlist Entries</CardTitle>
+   715→          <CardDescription className="text-xs">Most recent 20 entries. Approve or reject inline.</CardDescription>
+   716→        </CardHeader>
+   717→        <CardContent className="px-0">
+   718→          {listError ? (
+   719→            <div className="px-4 pb-4"><ErrorBanner message={listError} onRetry={() => void loadList()} /></div>
+   720→          ) : (
+   721→            <div className="overflow-x-auto">
+   722→              <Table>
+   723→                <TableHeader>
+   724→                  <TableRow className="border-slate-800 hover:bg-transparent">
+   725→                    <TableHead className="pl-4 text-slate-400">Email</TableHead>
+   726→                    <TableHead className="text-slate-400">Username</TableHead>
+   727→                    <TableHead className="text-slate-400">Status</TableHead>
+   728→                    <TableHead className="text-slate-400">Created</TableHead>
+   729→                    <TableHead className="pr-4 text-right text-slate-400">Actions</TableHead>
+   730→                  </TableRow>
+   731→                </TableHeader>
+   732→                <TableBody>
+   733→                  {loadingList ? (
+   734→                    <>
+   735→                      <LoadingRow cols={5} />
+   736→                      <LoadingRow cols={5} />
+   737→                      <LoadingRow cols={5} />
+   738→                    </>
+   739→                  ) : entries.length === 0 ? (
+   740→                    <TableRow className="border-slate-800 hover:bg-transparent">
+   741→                      <TableCell colSpan={5} className="py-10">
+   742→                        <EmptyState icon={Clock} message="No waitlist entries found." />
+   743→                      </TableCell>
+   744→                    </TableRow>
+   745→                  ) : (
+   746→                    entries.map((entry) => (
+   747→                      <TableRow key={entry.id} className="border-slate-800/60 hover:bg-slate-800/20">
+   748→                        <TableCell className="pl-4">
+   749→                          <div className="flex flex-col">
+   750→                            <MonoCell className="text-emerald-200">{entry.email}</MonoCell>
+   751→                            <MonoCell className="text-[10px] text-slate-600">{entry.id}</MonoCell>
+   752→                          </div>
+   753→                        </TableCell>
+   754→                        <TableCell><MonoCell>{entry.username}</MonoCell></TableCell>
+   755→                        <TableCell><StatusBadge status={entry.status} /></TableCell>
+   756→                        <TableCell><MonoCell className="text-slate-400">{formatRelativeTime(entry.createdAt)}</MonoCell></TableCell>
+   757→                        <TableCell className="pr-4">
+   758→                          <div className="flex justify-end gap-1.5">
+   759→                            <Button
+   760→                              size="sm"
+   761→                              variant="outline"
+   762→                              onClick={() => setApproveTarget(entry)}
+   763→                              disabled={entry.status === 'approved' || entry.status === 'converted'}
+   764→                              className="h-7 gap-1 border-emerald-500/40 bg-emerald-500/10 px-2 text-[11px] text-emerald-300 hover:bg-emerald-500/20 hover:text-emerald-200 disabled:opacity-40"
+   765→                            >
+   766→                              <CheckCircle className="h-3 w-3" /> Approve
+   767→                            </Button>
+   768→                            <Button
+   769→                              size="sm"
+   770→                              variant="outline"
+   771→                              onClick={() => setRejectTarget(entry)}
+   772→                              disabled={entry.status === 'rejected'}
+   773→                              className="h-7 gap-1 border-rose-500/40 bg-rose-500/10 px-2 text-[11px] text-rose-300 hover:bg-rose-500/20 hover:text-rose-200 disabled:opacity-40"
+   774→                            >
+   775→                              <XCircle className="h-3 w-3" /> Reject
+   776→                            </Button>
+   777→                          </div>
+   778→                        </TableCell>
+   779→                      </TableRow>
+   780→                    ))
+   781→                  )}
+   782→                </TableBody>
+   783→              </Table>
+   784→            </div>
+   785→          )}
+   786→        </CardContent>
+   787→      </Card>
+   788→
+   789→      <ApproveDialog
+   790→        entry={approveTarget}
+   791→        onClose={() => setApproveTarget(null)}
+   792→        onDone={() => { setApproveTarget(null); void loadStats(); void loadList() }}
+   793→      />
+   794→      <RejectDialog
+   795→        entry={rejectTarget}
+   796→        onClose={() => setRejectTarget(null)}
+   797→        onDone={() => { setRejectTarget(null); void loadStats(); void loadList() }}
+   798→      />
+   799→    </section>
+   800→  )
+   801→}
+   802→
+   803→function ApproveDialog({
+   804→  entry,
+   805→  onClose,
+   806→  onDone,
+   807→}: {
+   808→  entry: WaitlistEntry | null
+   809→  onClose: () => void
+   810→  onDone: () => void
+   811→}) {
+   812→  const [notes, setNotes] = React.useState('')
+   813→  const [submitting, setSubmitting] = React.useState(false)
+   814→
+   815→  React.useEffect(() => {
+   816→    if (entry) setNotes('')
+   817→  }, [entry])
+   818→
+   819→  const submit = async () => {
+   820→    if (!entry) return
+   821→    setSubmitting(true)
+   822→    try {
+   823→      await apiPost('/api/admin/waitlist/approve', {
+   824→        userId: entry.id,
+   825→        approvedBy: ADMIN_USER_ID,
+   826→        notes: notes.trim() || 'Approved via admin console',
+   827→      })
+   828→      toast.success(`Approved ${entry.email}`)
+   829→      onDone()
+   830→    } catch (e) {
+   831→      toast.error(e instanceof Error ? e.message : 'Approve failed')
+   832→    } finally {
+   833→      setSubmitting(false)
+   834→    }
+   835→  }
+   836→
+   837→  return (
+   838→    <Dialog open={!!entry} onOpenChange={(o) => !o && onClose()}>
+   839→      <DialogContent className="border-slate-800 bg-slate-950 text-zinc-100 sm:max-w-md">
+   840→        <DialogHeader>
+   841→          <DialogTitle className="flex items-center gap-2 font-mono text-base">
+   842→            <CheckCircle className="h-4 w-4 text-emerald-400" /> Approve Waitlist Entry
+   843→          </DialogTitle>
+   844→          <DialogDescription className="text-xs text-slate-400">
+   845→            The user will transition from <span className="font-mono text-amber-300">waitlist</span> to{' '}
+   846→            <span className="font-mono text-emerald-300">active</span> and receive a welcome email.
+   847→          </DialogDescription>
+   848→        </DialogHeader>
+   849→        {entry && (
+   850→          <div className="space-y-3">
+   851→            <div className="rounded-md border border-slate-800 bg-slate-900/60 px-3 py-2">
+   852→              <div className="flex items-center justify-between">
+   853→                <MonoCell className="text-emerald-200">{entry.email}</MonoCell>
+   854→                <StatusBadge status={entry.status} />
+   855→              </div>
+   856→              <MonoCell className="text-[10px] text-slate-600">@{entry.username} · {entry.id}</MonoCell>
+   857→            </div>
+   858→            <div className="space-y-1.5">
+   859→              <Label htmlFor="approve-notes" className="font-mono text-[11px] uppercase tracking-wide text-slate-400">
+   860→                Approval Notes
+   861→              </Label>
+   862→              <Textarea
+   863→                id="approve-notes"
+   864→                value={notes}
+   865→                onChange={(e) => setNotes(e.target.value)}
+   866→                placeholder="Optional notes for the audit trail…"
+   867→                className="resize-none border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-200 placeholder:text-slate-600 focus-visible:ring-emerald-500/30"
+   868→                rows={3}
+   869→              />
+   870→            </div>
+   871→          </div>
+   872→        )}
+   873→        <DialogFooter className="gap-2">
+   874→          <Button variant="ghost" size="sm" onClick={onClose} className="text-slate-400 hover:text-slate-200">
+   875→            Cancel
+   876→          </Button>
+   877→          <Button
+   878→            size="sm"
+   879→            onClick={() => void submit()}
+   880→            disabled={submitting}
+   881→            className="gap-1.5 border border-emerald-500/40 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30 hover:text-emerald-100"
+   882→          >
+   883→            {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
+   884→            Confirm Approve
+   885→          </Button>
+   886→        </DialogFooter>
+   887→      </DialogContent>
+   888→    </Dialog>
+   889→  )
+   890→}
+   891→
+   892→function RejectDialog({
+   893→  entry,
+   894→  onClose,
+   895→  onDone,
+   896→}: {
+   897→  entry: WaitlistEntry | null
+   898→  onClose: () => void
+   899→  onDone: () => void
+   900→}) {
+   901→  const [reason, setReason] = React.useState('')
+   902→  const [submitting, setSubmitting] = React.useState(false)
+   903→
+   904→  React.useEffect(() => {
+   905→    if (entry) setReason('')
+   906→  }, [entry])
+   907→
+   908→  const submit = async () => {
+   909→    if (!entry) return
+   910→    if (!reason.trim()) {
+   911→      toast.error('A rejection reason is required')
+   912→      return
+   913→    }
+   914→    setSubmitting(true)
+   915→    try {
+   916→      await apiPost('/api/admin/waitlist/reject', {
+   917→        userId: entry.id,
+   918→        rejectedBy: ADMIN_USER_ID,
+   919→        reason: reason.trim(),
+   920→      })
+   921→      toast.success(`Rejected ${entry.email}`)
+   922→      onDone()
+   923→    } catch (e) {
+   924→      toast.error(e instanceof Error ? e.message : 'Reject failed')
+   925→    } finally {
+   926→      setSubmitting(false)
+   927→    }
+   928→  }
+   929→
+   930→  return (
+   931→    <Dialog open={!!entry} onOpenChange={(o) => !o && onClose()}>
+   932→      <DialogContent className="border-slate-800 bg-slate-950 text-zinc-100 sm:max-w-md">
+   933→        <DialogHeader>
+   934→          <DialogTitle className="flex items-center gap-2 font-mono text-base">
+   935→            <XCircle className="h-4 w-4 text-rose-400" /> Reject Waitlist Entry
+   936→          </DialogTitle>
+   937→          <DialogDescription className="text-xs text-slate-400">
+   938→            This action is recorded in the audit log and is not reversible from this console.
+   939→          </DialogDescription>
+   940→        </DialogHeader>
+   941→        {entry && (
+   942→          <div className="space-y-3">
+   943→            <div className="rounded-md border border-slate-800 bg-slate-900/60 px-3 py-2">
+   944→              <MonoCell className="text-rose-200">{entry.email}</MonoCell>
+   945→              <MonoCell className="text-[10px] text-slate-600">@{entry.username} · {entry.id}</MonoCell>
+   946→            </div>
+   947→            <div className="space-y-1.5">
+   948→              <Label htmlFor="reject-reason" className="font-mono text-[11px] uppercase tracking-wide text-slate-400">
+   949→                Rejection Reason <span className="text-rose-400">*</span>
+   950→              </Label>
+   951→              <Textarea
+   952→                id="reject-reason"
+   953→                value={reason}
+   954→                onChange={(e) => setReason(e.target.value)}
+   955→                placeholder="Explain why this request is being rejected…"
+   956→                className="resize-none border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-200 placeholder:text-slate-600 focus-visible:ring-rose-500/30"
+   957→                rows={3}
+   958→              />
+   959→            </div>
+   960→          </div>
+   961→        )}
+   962→        <DialogFooter className="gap-2">
+   963→          <Button variant="ghost" size="sm" onClick={onClose} className="text-slate-400 hover:text-slate-200">
+   964→            Cancel
+   965→          </Button>
+   966→          <Button
+   967→            size="sm"
+   968→            onClick={() => void submit()}
+   969→            disabled={submitting}
+   970→            className="gap-1.5 border border-rose-500/40 bg-rose-500/20 text-rose-200 hover:bg-rose-500/30 hover:text-rose-100"
+   971→          >
+   972→            {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5" />}
+   973→            Confirm Reject
+   974→          </Button>
+   975→        </DialogFooter>
+   976→      </DialogContent>
+   977→    </Dialog>
+   978→  )
+   979→}
+   980→
+   981→// ─── Tab 2: Users ─────────────────────────────────────────────────────────────
+   982→
+   983→function UsersTab() {
+   984→  const [users, setUsers] = React.useState<readonly UserView[]>([])
+   985→  const [loading, setLoading] = React.useState(true)
+   986→  const [error, setError] = React.useState<string | null>(null)
+   987→  const [search, setSearch] = React.useState('')
+   988→  const [status, setStatus] = React.useState<string>('all')
+   989→  const [detailUser, setDetailUser] = React.useState<UserView | null>(null)
+   990→  const [suspendTarget, setSuspendTarget] = React.useState<UserView | null>(null)
+   991→  const [deleteTarget, setDeleteTarget] = React.useState<UserView | null>(null)
+   992→  const [reactivateTarget, setReactivateTarget] = React.useState<UserView | null>(null)
+   993→  const searchTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+   994→
+   995→  const load = React.useCallback(async (searchVal?: string, statusVal?: string) => {
+   996→    setLoading(true)
+   997→    setError(null)
+   998→    try {
+   999→      const params = new URLSearchParams({ limit: '20' })
+  1000→      const sv = searchVal ?? search
+  1001→      const stv = statusVal ?? status
+  1002→      if (sv.trim()) params.set('search', sv.trim())
+  1003→      if (stv && stv !== 'all') params.set('status', stv)
+  1004→      const data = await apiGet<ListResult<UserView>>(`/api/admin/users?${params.toString()}`)
+  1005→      setUsers(data.items)
+  1006→    } catch (e) {
+  1007→      setError(e instanceof Error ? e.message : 'Failed to load users')
+  1008→    } finally {
+  1009→      setLoading(false)
+  1010→    }
+  1011→  }, [search, status])
+  1012→
+  1013→  React.useEffect(() => {
+  1014→    void load()
+  1015→  }, [load])
+  1016→
+  1017→  const onSearchChange = (val: string) => {
+  1018→    setSearch(val)
+  1019→    if (searchTimer.current) clearTimeout(searchTimer.current)
+  1020→    searchTimer.current = setTimeout(() => void load(val, status), 350)
+  1021→  }
+  1022→
+  1023→  const onStatusChange = (val: string) => {
+  1024→    setStatus(val)
+  1025→    void load(search, val)
+  1026→  }
+  1027→
+  1028→  const refreshAfterAction = () => {
+  1029→    setDetailUser(null)
+  1030→    setSuspendTarget(null)
+  1031→    setDeleteTarget(null)
+  1032→    setReactivateTarget(null)
+  1033→    void load()
+  1034→  }
+  1035→
+  1036→  return (
+  1037→    <section className="space-y-6">
+  1038→      <SectionHeader
+  1039→        icon={Users}
+  1040→        title="User Management"
+  1041→        description="Search, inspect, and manage the full user lifecycle."
+  1042→        endpoint="GET /api/admin/users"
+  1043→      />
+  1044→
+  1045→      {/* Filters */}
+  1046→      <Card className="border-slate-800 bg-slate-900/40 ring-1 ring-inset ring-slate-800/60">
+  1047→        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
+  1048→          <div className="relative flex-1">
+  1049→            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
+  1050→            <Input
+  1051→              value={search}
+  1052→              onChange={(e) => onSearchChange(e.target.value)}
+  1053→              placeholder="Search by email or username…"
+  1054→              className="border-slate-700 bg-slate-950/60 pl-9 font-mono text-xs text-slate-200 placeholder:text-slate-600 focus-visible:ring-emerald-500/30"
+  1055→            />
+  1056→          </div>
+  1057→          <Select value={status} onValueChange={onStatusChange}>
+  1058→            <SelectTrigger className="w-full border-slate-700 bg-slate-950/60 font-mono text-xs text-slate-200 sm:w-[180px] focus:ring-emerald-500/30">
+  1059→              <SelectValue placeholder="Status" />
+  1060→            </SelectTrigger>
+  1061→            <SelectContent className="border-slate-800 bg-slate-950 text-zinc-100">
+  1062→              {USER_STATUS_OPTIONS.map((opt) => (
+  1063→                <SelectItem key={opt.value} value={opt.value} className="font-mono text-xs focus:bg-emerald-500/10 focus:text-emerald-300">
+  1064→                  {opt.label}
+  1065→                </SelectItem>
+  1066→              ))}
+  1067→            </SelectContent>
+  1068→          </Select>
+  1069→          <Button
+  1070→            size="sm"
+  1071→            variant="outline"
+  1072→            onClick={() => void load()}
+  1073→            className="border-slate-700 bg-slate-900/60 text-slate-300 hover:border-emerald-500/40 hover:text-emerald-300"
+  1074→          >
+  1075→            <RefreshCw className="mr-1.5 h-3 w-3" /> Refresh
+  1076→          </Button>
+  1077→        </CardContent>
+  1078→      </Card>
+  1079→
+  1080→      {error && <ErrorBanner message={error} onRetry={() => void load()} />}
+  1081→
+  1082→      <Card className="border-slate-800 bg-slate-900/40 ring-1 ring-inset ring-slate-800/60">
+  1083→        <CardContent className="px-0">
+  1084→          <div className="overflow-x-auto">
+  1085→            <Table>
+  1086→              <TableHeader>
+  1087→                <TableRow className="border-slate-800 hover:bg-transparent">
+  1088→                  <TableHead className="pl-4 text-slate-400">Email</TableHead>
+  1089→                  <TableHead className="text-slate-400">Username</TableHead>
+  1090→                  <TableHead className="text-slate-400">Display Name</TableHead>
+  1091→                  <TableHead className="text-slate-400">Status</TableHead>
+  1092→                  <TableHead className="text-slate-400">Country</TableHead>
+  1093→                  <TableHead className="text-slate-400">MFA</TableHead>
+  1094→                  <TableHead className="text-slate-400">Created</TableHead>
+  1095→                  <TableHead className="pr-4 text-right text-slate-400">Actions</TableHead>
+  1096→                </TableRow>
+  1097→              </TableHeader>
+  1098→              <TableBody>
+  1099→                {loading ? (
+  1100→                  <>
+  1101→                    <LoadingRow cols={8} />
+  1102→                    <LoadingRow cols={8} />
+  1103→                    <LoadingRow cols={8} />
+  1104→                  </>
+  1105→                ) : users.length === 0 ? (
+  1106→                  <TableRow className="border-slate-800 hover:bg-transparent">
+  1107→                    <TableCell colSpan={8} className="py-10">
+  1108→                      <EmptyState icon={Users} message="No users match the current filters." />
+  1109→                    </TableCell>
+  1110→                  </TableRow>
+  1111→                ) : (
+  1112→                  users.map((u) => (
+  1113→                    <TableRow key={u.userId} className="border-slate-800/60 hover:bg-slate-800/20">
+  1114→                      <TableCell className="pl-4">
+  1115→                        <button
+  1116→                          onClick={() => setDetailUser(u)}
+  1117→                          className="flex flex-col text-left transition-colors hover:text-emerald-300"
+  1118→                        >
+  1119→                          <MonoCell className="text-emerald-200">{u.email}</MonoCell>
+  1120→                          <MonoCell className="text-[10px] text-slate-600">{u.userId}</MonoCell>
+  1121→                        </button>
+  1122→                      </TableCell>
+  1123→                      <TableCell><MonoCell>{u.username}</MonoCell></TableCell>
+  1124→                      <TableCell><MonoCell className="text-slate-200">{u.displayName}</MonoCell></TableCell>
+  1125→                      <TableCell><StatusBadge status={u.status} /></TableCell>
+  1126→                      <TableCell><MonoCell>{u.country || '—'}</MonoCell></TableCell>
+  1127→                      <TableCell>
+  1128→                        {u.mfaEnabled ? (
+  1129→                          <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 font-mono text-[10px] text-emerald-300">
+  1130→                            <ShieldCheck className="mr-1 h-2.5 w-2.5" />{u.mfaMethod || 'on'}
+  1131→                          </Badge>
+  1132→                        ) : (
+  1133→                          <Badge variant="outline" className="border-slate-700 bg-slate-800/40 font-mono text-[10px] text-slate-500">
+  1134→                            off
+  1135→                          </Badge>
+  1136→                        )}
+  1137→                      </TableCell>
+  1138→                      <TableCell><MonoCell className="text-slate-400">{formatRelativeTime(u.createdAt)}</MonoCell></TableCell>
+  1139→                      <TableCell className="pr-4">
+  1140→                        <div className="flex justify-end gap-1">
+  1141→                          <Button
+  1142→                            size="sm"
+  1143→                            variant="ghost"
+  1144→                            onClick={() => setDetailUser(u)}
+  1145→                            className="h-7 px-2 text-[11px] text-slate-400 hover:bg-slate-700/40 hover:text-emerald-300"
+  1146→                            aria-label="View user details"
+  1147→                          >
+  1148→                            <Eye className="h-3 w-3" />
+  1149→                          </Button>
+  1150→                          {u.status === 'suspended' ? (
+  1151→                            <Button
+  1152→                              size="sm"
+  1153→                              variant="ghost"
+  1154→                              onClick={() => setReactivateTarget(u)}
+  1155→                              className="h-7 px-2 text-[11px] text-emerald-300 hover:bg-emerald-500/10"
+  1156→                              aria-label="Reactivate user"
+  1157→                            >
+  1158→                              <CheckCircle className="h-3 w-3" />
+  1159→                            </Button>
+  1160→                          ) : (
+  1161→                            <Button
+  1162→                              size="sm"
+  1163→                              variant="ghost"
+  1164→                              onClick={() => setSuspendTarget(u)}
+  1165→                              disabled={u.status === 'deleted'}
+  1166→                              className="h-7 px-2 text-[11px] text-amber-300 hover:bg-amber-500/10 disabled:opacity-30"
+  1167→                              aria-label="Suspend user"
+  1168→                            >
+  1169→                              <AlertTriangle className="h-3 w-3" />
+  1170→                            </Button>
+  1171→                          )}
+  1172→                          <Button
+  1173→                            size="sm"
+  1174→                            variant="ghost"
+  1175→                            onClick={() => setDeleteTarget(u)}
+  1176→                            disabled={u.status === 'deleted'}
+  1177→                            className="h-7 px-2 text-[11px] text-rose-300 hover:bg-rose-500/10 disabled:opacity-30"
+  1178→                            aria-label="Delete user"
+  1179→                          >
+  1180→                            <Trash2 className="h-3 w-3" />
+  1181→                          </Button>
+  1182→                        </div>
+  1183→                      </TableCell>
+  1184→                    </TableRow>
+  1185→                  ))
+  1186→                )}
+  1187→              </TableBody>
+  1188→            </Table>
+  1189→          </div>
+  1190→        </CardContent>
+  1191→      </Card>
+  1192→
+  1193→      <UserDetailDialog user={detailUser} onClose={() => setDetailUser(null)} />
+  1194→      <SuspendDialog user={suspendTarget} onClose={() => setSuspendTarget(null)} onDone={refreshAfterAction} />
+  1195→      <ReactivateDialog user={reactivateTarget} onClose={() => setReactivateTarget(null)} onDone={refreshAfterAction} />
+  1196→      <DeleteUserDialog user={deleteTarget} onClose={() => setDeleteTarget(null)} onDone={refreshAfterAction} />
+  1197→    </section>
+  1198→  )
+  1199→}
+  1200→
+  1201→function UserDetailDialog({ user, onClose }: { user: UserView | null; onClose: () => void }) {
+  1202→  return (
+  1203→    <Dialog open={!!user} onOpenChange={(o) => !o && onClose()}>
+  1204→      <DialogContent className="border-slate-800 bg-slate-950 text-zinc-100 sm:max-w-lg">
+  1205→        <DialogHeader>
+  1206→          <DialogTitle className="flex items-center gap-2 font-mono text-base">
+  1207→            <Users className="h-4 w-4 text-emerald-400" /> User Profile
+  1208→          </DialogTitle>
+  1209→          <DialogDescription className="text-xs text-slate-400">
+  1210→            Full read-model projection of the user aggregate.
+  1211→          </DialogDescription>
+  1212→        </DialogHeader>
+  1213→        {user && (
+  1214→          <ScrollArea className="max-h-[60vh] pr-2">
+  1215→            <div className="space-y-4">
+  1216→              <div className="grid grid-cols-2 gap-3">
+  1217→                <DetailField label="Email" value={user.email} accent />
+  1218→                <DetailField label="Username" value={user.username} />
+  1219→                <DetailField label="Display Name" value={user.displayName} />
+  1220→                <DetailField label="Country" value={user.country || '—'} />
+  1221→                <DetailField label="Timezone" value={user.timezone || '—'} />
+  1222→                <DetailField label="Locale" value={user.locale || '—'} />
+  1223→              </div>
+  1224→
+  1225→              <div className="flex flex-wrap gap-2">
+  1226→                <StatusBadge status={user.status} />
+  1227→                {user.emailVerified ? (
+  1228→                  <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 font-mono text-[10px] text-emerald-300">
+  1229→                    <CheckCircle className="mr-1 h-2.5 w-2.5" /> Email Verified
+  1230→                  </Badge>
+  1231→                ) : (
+  1232→                  <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 font-mono text-[10px] text-amber-300">
+  1233→                    <AlertTriangle className="mr-1 h-2.5 w-2.5" /> Email Unverified
+  1234→                  </Badge>
+  1235→                )}
+  1236→                {user.mfaEnabled && (
+  1237→                  <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 font-mono text-[10px] text-emerald-300">
+  1238→                    <ShieldCheck className="mr-1 h-2.5 w-2.5" /> MFA: {user.mfaMethod || 'on'}
+  1239→                  </Badge>
+  1240→                )}
+  1241→              </div>
+  1242→
+  1243→              <div>
+  1244→                <p className="mb-1.5 font-mono text-[10px] uppercase tracking-widest text-slate-500">User ID</p>
+  1245→                <code className="block break-all rounded-md border border-slate-800 bg-slate-900/60 px-2.5 py-1.5 font-mono text-[11px] text-cyan-300">
+  1246→                  {user.userId}
+  1247→                </code>
+  1248→              </div>
+  1249→
+  1250→              <div>
+  1251→                <p className="mb-1.5 font-mono text-[10px] uppercase tracking-widest text-slate-500">
+  1252→                  Roles ({user.roles.length})
+  1253→                </p>
+  1254→                {user.roles.length === 0 ? (
+  1255→                  <MonoCell className="text-slate-600">No roles assigned.</MonoCell>
+  1256→                ) : (
+  1257→                  <div className="flex flex-wrap gap-1.5">
+  1258→                    {user.roles.map((r) => (
+  1259→                      <Badge key={r.roleId} variant="outline" className="border-emerald-500/30 bg-emerald-500/5 font-mono text-[10px] text-emerald-200">
+  1260→                        <Shield className="mr-1 h-2.5 w-2.5" />{r.roleName}
+  1261→                      </Badge>
+  1262→                    ))}
+  1263→                  </div>
+  1264→                )}
+  1265→              </div>
+  1266→
+  1267→              <div>
+  1268→                <p className="mb-1.5 font-mono text-[10px] uppercase tracking-widest text-slate-500">
+  1269→                  Memberships ({user.memberships.length})
+  1270→                </p>
+  1271→                {user.memberships.length === 0 ? (
+  1272→                  <MonoCell className="text-slate-600">No organization memberships.</MonoCell>
+  1273→                ) : (
+  1274→                  <div className="space-y-1">
+  1275→                    {user.memberships.map((m, i) => (
+  1276→                      <div key={i} className="flex items-center justify-between rounded-md border border-slate-800 bg-slate-900/60 px-2.5 py-1.5">
+  1277→                        <MonoCell className="text-cyan-300">{m.organizationId}</MonoCell>
+  1278→                        <MonoCell className="text-[10px] text-slate-500">role: {m.roleId}</MonoCell>
+  1279→                      </div>
+  1280→                    ))}
+  1281→                  </div>
+  1282→                )}
+  1283→              </div>
+  1284→
+  1285→              <Separator className="bg-slate-800" />
+  1286→              <div className="grid grid-cols-2 gap-3">
+  1287→                <DetailField label="Created" value={formatRelativeTime(user.createdAt)} />
+  1288→                <DetailField label="Updated" value={formatRelativeTime(user.updatedAt)} />
+  1289→              </div>
+  1290→            </div>
+  1291→          </ScrollArea>
+  1292→        )}
+  1293→      </DialogContent>
+  1294→    </Dialog>
+  1295→  )
+  1296→}
+  1297→
+  1298→function DetailField({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  1299→  return (
+  1300→    <div className="space-y-0.5">
+  1301→      <p className="font-mono text-[10px] uppercase tracking-widest text-slate-500">{label}</p>
+  1302→      <p className={`font-mono text-xs ${accent ? 'text-emerald-200' : 'text-slate-200'}`}>{value}</p>
+  1303→    </div>
+  1304→  )
+  1305→}
+  1306→
+  1307→function SuspendDialog({
+  1308→  user,
+  1309→  onClose,
+  1310→  onDone,
+  1311→}: {
+  1312→  user: UserView | null
+  1313→  onClose: () => void
+  1314→  onDone: () => void
+  1315→}) {
+  1316→  const [reason, setReason] = React.useState('')
+  1317→  const [submitting, setSubmitting] = React.useState(false)
+  1318→
+  1319→  React.useEffect(() => {
+  1320→    if (user) setReason('')
+  1321→  }, [user])
+  1322→
+  1323→  const submit = async () => {
+  1324→    if (!user) return
+  1325→    if (!reason.trim()) {
+  1326→      toast.error('A suspension reason is required')
+  1327→      return
+  1328→    }
+  1329→    setSubmitting(true)
+  1330→    try {
+  1331→      await apiPost('/api/admin/users/suspend', {
+  1332→        userId: user.userId,
+  1333→        suspendedBy: ADMIN_USER_ID,
+  1334→        reason: reason.trim(),
+  1335→      })
+  1336→      toast.success(`Suspended ${user.email}`)
+  1337→      onDone()
+  1338→    } catch (e) {
+  1339→      toast.error(e instanceof Error ? e.message : 'Suspend failed')
+  1340→    } finally {
+  1341→      setSubmitting(false)
+  1342→    }
+  1343→  }
+  1344→
+  1345→  return (
+  1346→    <Dialog open={!!user} onOpenChange={(o) => !o && onClose()}>
+  1347→      <DialogContent className="border-slate-800 bg-slate-950 text-zinc-100 sm:max-w-md">
+  1348→        <DialogHeader>
+  1349→          <DialogTitle className="flex items-center gap-2 font-mono text-base">
+  1350→            <AlertTriangle className="h-4 w-4 text-amber-400" /> Suspend User
+  1351→          </DialogTitle>
+  1352→          <DialogDescription className="text-xs text-slate-400">
+  1353→            The user will be prevented from authenticating until reactivated.
+  1354→          </DialogDescription>
+  1355→        </DialogHeader>
+  1356→        {user && (
+  1357→          <div className="space-y-3">
+  1358→            <div className="rounded-md border border-slate-800 bg-slate-900/60 px-3 py-2">
+  1359→              <MonoCell className="text-amber-200">{user.email}</MonoCell>
+  1360→              <MonoCell className="text-[10px] text-slate-600">@{user.username} · {user.userId}</MonoCell>
+  1361→            </div>
+  1362→            <div className="space-y-1.5">
+  1363→              <Label htmlFor="suspend-reason" className="font-mono text-[11px] uppercase tracking-wide text-slate-400">
+  1364→                Suspension Reason <span className="text-rose-400">*</span>
+  1365→              </Label>
+  1366→              <Textarea
+  1367→                id="suspend-reason"
+  1368→                value={reason}
+  1369→                onChange={(e) => setReason(e.target.value)}
+  1370→                placeholder="Why is this user being suspended?"
+  1371→                className="resize-none border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-200 placeholder:text-slate-600 focus-visible:ring-amber-500/30"
+  1372→                rows={3}
+  1373→              />
+  1374→            </div>
+  1375→          </div>
+  1376→        )}
+  1377→        <DialogFooter className="gap-2">
+  1378→          <Button variant="ghost" size="sm" onClick={onClose} className="text-slate-400 hover:text-slate-200">Cancel</Button>
+  1379→          <Button
+  1380→            size="sm"
+  1381→            onClick={() => void submit()}
+  1382→            disabled={submitting}
+  1383→            className="gap-1.5 border border-amber-500/40 bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 hover:text-amber-100"
+  1384→          >
+  1385→            {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+  1386→            Confirm Suspend
+  1387→          </Button>
+  1388→        </DialogFooter>
+  1389→      </DialogContent>
+  1390→    </Dialog>
+  1391→  )
+  1392→}
+  1393→
+  1394→function ReactivateDialog({
+  1395→  user,
+  1396→  onClose,
+  1397→  onDone,
+  1398→}: {
+  1399→  user: UserView | null
+  1400→  onClose: () => void
+  1401→  onDone: () => void
+  1402→}) {
+  1403→  const [submitting, setSubmitting] = React.useState(false)
+  1404→
+  1405→  const submit = async () => {
+  1406→    if (!user) return
+  1407→    setSubmitting(true)
+  1408→    try {
+  1409→      await apiPost('/api/admin/users/reactivate', {
+  1410→        userId: user.userId,
+  1411→        reactivatedBy: ADMIN_USER_ID,
+  1412→      })
+  1413→      toast.success(`Reactivated ${user.email}`)
+  1414→      onDone()
+  1415→    } catch (e) {
+  1416→      toast.error(e instanceof Error ? e.message : 'Reactivate failed')
+  1417→    } finally {
+  1418→      setSubmitting(false)
+  1419→    }
+  1420→  }
+  1421→
+  1422→  return (
+  1423→    <Dialog open={!!user} onOpenChange={(o) => !o && onClose()}>
+  1424→      <DialogContent className="border-slate-800 bg-slate-950 text-zinc-100 sm:max-w-sm">
+  1425→        <DialogHeader>
+  1426→          <DialogTitle className="flex items-center gap-2 font-mono text-base">
+  1427→            <CheckCircle className="h-4 w-4 text-emerald-400" /> Reactivate User
+  1428→          </DialogTitle>
+  1429→          <DialogDescription className="text-xs text-slate-400">
+  1430→            Restore full access for this user.
+  1431→          </DialogDescription>
+  1432→        </DialogHeader>
+  1433→        {user && (
+  1434→          <div className="rounded-md border border-slate-800 bg-slate-900/60 px-3 py-2">
+  1435→            <MonoCell className="text-emerald-200">{user.email}</MonoCell>
+  1436→            <MonoCell className="text-[10px] text-slate-600">@{user.username}</MonoCell>
+  1437→          </div>
+  1438→        )}
+  1439→        <DialogFooter className="gap-2">
+  1440→          <Button variant="ghost" size="sm" onClick={onClose} className="text-slate-400 hover:text-slate-200">Cancel</Button>
+  1441→          <Button
+  1442→            size="sm"
+  1443→            onClick={() => void submit()}
+  1444→            disabled={submitting}
+  1445→            className="gap-1.5 border border-emerald-500/40 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30 hover:text-emerald-100"
+  1446→          >
+  1447→            {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
+  1448→            Confirm Reactivate
+  1449→          </Button>
+  1450→        </DialogFooter>
+  1451→      </DialogContent>
+  1452→    </Dialog>
+  1453→  )
+  1454→}
+  1455→
+  1456→function DeleteUserDialog({
+  1457→  user,
+  1458→  onClose,
+  1459→  onDone,
+  1460→}: {
+  1461→  user: UserView | null
+  1462→  onClose: () => void
+  1463→  onDone: () => void
+  1464→}) {
+  1465→  const [confirmText, setConfirmText] = React.useState('')
+  1466→  const [submitting, setSubmitting] = React.useState(false)
+  1467→
+  1468→  React.useEffect(() => {
+  1469→    if (user) setConfirmText('')
+  1470→  }, [user])
+  1471→
+  1472→  const submit = async () => {
+  1473→    if (!user) return
+  1474→    setSubmitting(true)
+  1475→    try {
+  1476→      await apiPost('/api/admin/users/delete', {
+  1477→        userId: user.userId,
+  1478→        deletedBy: ADMIN_USER_ID,
+  1479→      })
+  1480→      toast.success(`Deleted ${user.email}`)
+  1481→      onDone()
+  1482→    } catch (e) {
+  1483→      toast.error(e instanceof Error ? e.message : 'Delete failed')
+  1484→    } finally {
+  1485→      setSubmitting(false)
+  1486→    }
+  1487→  }
+  1488→
+  1489→  return (
+  1490→    <Dialog open={!!user} onOpenChange={(o) => !o && onClose()}>
+  1491→      <DialogContent className="border-rose-500/30 bg-slate-950 text-zinc-100 sm:max-w-md">
+  1492→        <DialogHeader>
+  1493→          <DialogTitle className="flex items-center gap-2 font-mono text-base">
+  1494→            <Trash2 className="h-4 w-4 text-rose-400" /> Delete User
+  1495→          </DialogTitle>
+  1496→          <DialogDescription className="text-xs text-slate-400">
+  1497→            This is a soft-delete event. The user will be permanently marked as deleted.
+  1498→          </DialogDescription>
+  1499→        </DialogHeader>
+  1500→        {user && (
+  1501→          <div className="space-y-3">
+  1502→            <div className="flex items-start gap-2 rounded-md border border-rose-500/30 bg-rose-500/5 px-3 py-2.5">
+  1503→              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-400" />
+  1504→              <p className="font-mono text-[11px] text-rose-200">
+  1505→                You are about to delete <span className="text-rose-100">{user.email}</span>. This action is recorded in the audit log.
+  1506→              </p>
+  1507→            </div>
+  1508→            <div className="space-y-1.5">
+  1509→              <Label htmlFor="delete-confirm" className="font-mono text-[11px] uppercase tracking-wide text-slate-400">
+  1510→                Type <span className="text-rose-300">DELETE</span> to confirm
+  1511→              </Label>
+  1512→              <Input
+  1513→                id="delete-confirm"
+  1514→                value={confirmText}
+  1515→                onChange={(e) => setConfirmText(e.target.value)}
+  1516→                placeholder="DELETE"
+  1517→                className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-200 placeholder:text-slate-600 focus-visible:ring-rose-500/30"
+  1518→              />
+  1519→            </div>
+  1520→          </div>
+  1521→        )}
+  1522→        <DialogFooter className="gap-2">
+  1523→          <Button variant="ghost" size="sm" onClick={onClose} className="text-slate-400 hover:text-slate-200">Cancel</Button>
+  1524→          <Button
+  1525→            size="sm"
+  1526→            onClick={() => void submit()}
+  1527→            disabled={submitting || confirmText !== 'DELETE'}
+  1528→            className="gap-1.5 border border-rose-500/40 bg-rose-500/20 text-rose-200 hover:bg-rose-500/30 hover:text-rose-100 disabled:opacity-40"
+  1529→          >
+  1530→            {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+  1531→            Delete Permanently
+  1532→          </Button>
+  1533→        </DialogFooter>
+  1534→      </DialogContent>
+  1535→    </Dialog>
+  1536→  )
+  1537→}
+  1538→
+  1539→// ─── Tab 3: Organizations ─────────────────────────────────────────────────────
+  1540→
+  1541→function OrganizationsTab() {
+  1542→  const [orgs, setOrgs] = React.useState<readonly OrganizationView[]>([])
+  1543→  const [loading, setLoading] = React.useState(true)
+  1544→  const [error, setError] = React.useState<string | null>(null)
+  1545→  const [createOpen, setCreateOpen] = React.useState(false)
+  1546→  const [selectedOrg, setSelectedOrg] = React.useState<OrganizationView | null>(null)
+  1547→
+  1548→  const load = React.useCallback(async () => {
+  1549→    setLoading(true)
+  1550→    setError(null)
+  1551→    try {
+  1552→      const data = await apiGet<ListResult<OrganizationView>>('/api/admin/organizations?limit=20')
+  1553→      setOrgs(data.items)
+  1554→    } catch (e) {
+  1555→      setError(e instanceof Error ? e.message : 'Failed to load organizations')
+  1556→    } finally {
+  1557→      setLoading(false)
+  1558→    }
+  1559→  }, [])
+  1560→
+  1561→  React.useEffect(() => {
+  1562→    void load()
+  1563→  }, [load])
+  1564→
+  1565→  return (
+  1566→    <section className="space-y-6">
+  1567→      <SectionHeader
+  1568→        icon={Building2}
+  1569→        title="Organizations"
+  1570→        description="Manage organizations, their type, and membership."
+  1571→        endpoint="GET /api/admin/organizations"
+  1572→        action={
+  1573→          <Button
+  1574→            size="sm"
+  1575→            onClick={() => setCreateOpen(true)}
+  1576→            className="gap-1.5 border border-emerald-500/40 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25 hover:text-emerald-100"
+  1577→          >
+  1578→            <Plus className="h-3.5 w-3.5" /> New Organization
+  1579→          </Button>
+  1580→        }
+  1581→      />
+  1582→
+  1583→      {error && <ErrorBanner message={error} onRetry={() => void load()} />}
+  1584→
+  1585→      {loading ? (
+  1586→        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+  1587→          {Array.from({ length: 6 }).map((_, i) => (
+  1588→            <Card key={i} className="border-slate-800 bg-slate-900/40">
+  1589→              <CardContent className="space-y-3 p-4">
+  1590→                <Skeleton className="h-4 w-2/3" />
+  1591→                <Skeleton className="h-3 w-1/2" />
+  1592→                <Skeleton className="h-8 w-full" />
+  1593→              </CardContent>
+  1594→            </Card>
+  1595→          ))}
+  1596→        </div>
+  1597→      ) : orgs.length === 0 ? (
+  1598→        <EmptyState icon={Building2} message="No organizations found. Create one to get started." />
+  1599→      ) : (
+  1600→        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+  1601→          {orgs.map((org) => (
+  1602→            <Card
+  1603→              key={org.organizationId}
+  1604→              className="group cursor-pointer border-slate-800 bg-slate-900/40 py-4 ring-1 ring-inset ring-slate-800/60 transition-colors hover:border-emerald-500/40 hover:bg-slate-900/70"
+  1605→              onClick={() => setSelectedOrg(org)}
+  1606→            >
+  1607→              <CardContent className="space-y-3 px-4">
+  1608→                <div className="flex items-start justify-between gap-2">
+  1609→                  <div className="flex min-w-0 items-center gap-2">
+  1610→                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-cyan-500/30 bg-cyan-500/10">
+  1611→                      <Building2 className="h-3.5 w-3.5 text-cyan-400" />
+  1612→                    </div>
+  1613→                    <div className="min-w-0">
+  1614→                      <p className="truncate font-mono text-sm text-zinc-100">{org.name}</p>
+  1615→                      <p className="truncate font-mono text-[10px] text-slate-500">{org.slug}</p>
+  1616→                    </div>
+  1617→                  </div>
+  1618→                  <ChevronRight className="h-4 w-4 shrink-0 text-slate-600 transition-colors group-hover:text-emerald-400" />
+  1619→                </div>
+  1620→                <div className="flex flex-wrap items-center gap-1.5">
+  1621→                  <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 font-mono text-[10px] text-cyan-300">
+  1622→                    {org.type}
+  1623→                  </Badge>
+  1624→                  {org.active ? (
+  1625→                    <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 font-mono text-[10px] text-emerald-300">
+  1626→                      Active
+  1627→                    </Badge>
+  1628→                  ) : (
+  1629→                    <Badge variant="outline" className="border-slate-600 bg-slate-800/40 font-mono text-[10px] text-slate-400">
+  1630→                      Inactive
+  1631→                    </Badge>
+  1632→                  )}
+  1633→                </div>
+  1634→                <Separator className="bg-slate-800" />
+  1635→                <div className="flex items-center justify-between">
+  1636→                  <div className="flex items-center gap-1.5">
+  1637→                    <Users className="h-3 w-3 text-slate-500" />
+  1638→                    <MonoCell className="text-slate-300">{org.memberCount} member{org.memberCount === 1 ? '' : 's'}</MonoCell>
+  1639→                  </div>
+  1640→                  <MonoCell className="text-[10px] text-slate-600">{formatRelativeTime(org.createdAt)}</MonoCell>
+  1641→                </div>
+  1642→              </CardContent>
+  1643→            </Card>
+  1644→          ))}
+  1645→        </div>
+  1646→      )}
+  1647→
+  1648→      <CreateOrganizationDialog open={createOpen} onClose={() => setCreateOpen(false)} onDone={() => { setCreateOpen(false); void load() }} />
+  1649→      <OrganizationMembersDialog org={selectedOrg} onClose={() => setSelectedOrg(null)} />
+  1650→    </section>
+  1651→  )
+  1652→}
+  1653→
+  1654→function CreateOrganizationDialog({
+  1655→  open,
+  1656→  onClose,
+  1657→  onDone,
+  1658→}: {
+  1659→  open: boolean
+  1660→  onClose: () => void
+  1661→  onDone: () => void
+  1662→}) {
+  1663→  const [name, setName] = React.useState('')
+  1664→  const [slug, setSlug] = React.useState('')
+  1665→  const [type, setType] = React.useState<string>(ORG_TYPE_OPTIONS[0])
+  1666→  const [submitting, setSubmitting] = React.useState(false)
+  1667→
+  1668→  React.useEffect(() => {
+  1669→    if (open) {
+  1670→      setName('')
+  1671→      setSlug('')
+  1672→      setType(ORG_TYPE_OPTIONS[0])
+  1673→    }
+  1674→  }, [open])
+  1675→
+  1676→  const autoSlug = (val: string) => {
+  1677→    setSlug(val.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''))
+  1678→  }
+  1679→
+  1680→  const submit = async () => {
+  1681→    if (!name.trim() || !slug.trim()) {
+  1682→      toast.error('Name and slug are required')
+  1683→      return
+  1684→    }
+  1685→    setSubmitting(true)
+  1686→    try {
+  1687→      await apiPost('/api/admin/organizations/create', {
+  1688→        name: name.trim(),
+  1689→        slug: slug.trim(),
+  1690→        type,
+  1691→        createdById: ADMIN_USER_ID,
+  1692→      })
+  1693→      toast.success(`Created organization "${name.trim()}"`)
+  1694→      onDone()
+  1695→    } catch (e) {
+  1696→      toast.error(e instanceof Error ? e.message : 'Create failed')
+  1697→    } finally {
+  1698→      setSubmitting(false)
+  1699→    }
+  1700→  }
+  1701→
+  1702→  return (
+  1703→    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+  1704→      <DialogContent className="border-slate-800 bg-slate-950 text-zinc-100 sm:max-w-md">
+  1705→        <DialogHeader>
+  1706→          <DialogTitle className="flex items-center gap-2 font-mono text-base">
+  1707→            <Plus className="h-4 w-4 text-emerald-400" /> Create Organization
+  1708→          </DialogTitle>
+  1709→          <DialogDescription className="text-xs text-slate-400">
+  1710→            Organizations group users and scopes. A type governs default policies.
+  1711→          </DialogDescription>
+  1712→        </DialogHeader>
+  1713→        <div className="space-y-3">
+  1714→          <div className="space-y-1.5">
+  1715→            <Label htmlFor="org-name" className="font-mono text-[11px] uppercase tracking-wide text-slate-400">Name</Label>
+  1716→            <Input
+  1717→              id="org-name"
+  1718→              value={name}
+  1719→              onChange={(e) => { setName(e.target.value); autoSlug(e.target.value) }}
+  1720→              placeholder="Acme Studios"
+  1721→              className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-200 placeholder:text-slate-600 focus-visible:ring-emerald-500/30"
+  1722→            />
+  1723→          </div>
+  1724→          <div className="space-y-1.5">
+  1725→            <Label htmlFor="org-slug" className="font-mono text-[11px] uppercase tracking-wide text-slate-400">Slug</Label>
+  1726→            <Input
+  1727→              id="org-slug"
+  1728→              value={slug}
+  1729→              onChange={(e) => setSlug(e.target.value)}
+  1730→              placeholder="acme-studios"
+  1731→              className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-200 placeholder:text-slate-600 focus-visible:ring-emerald-500/30"
+  1732→            />
+  1733→          </div>
+  1734→          <div className="space-y-1.5">
+  1735→            <Label className="font-mono text-[11px] uppercase tracking-wide text-slate-400">Type</Label>
+  1736→            <Select value={type} onValueChange={setType}>
+  1737→              <SelectTrigger className="w-full border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-200 focus:ring-emerald-500/30">
+  1738→                <SelectValue />
+  1739→              </SelectTrigger>
+  1740→              <SelectContent className="border-slate-800 bg-slate-950 text-zinc-100">
+  1741→                {ORG_TYPE_OPTIONS.map((t) => (
+  1742→                  <SelectItem key={t} value={t} className="font-mono text-xs focus:bg-emerald-500/10 focus:text-emerald-300">
+  1743→                    {t}
+  1744→                  </SelectItem>
+  1745→                ))}
+  1746→              </SelectContent>
+  1747→            </Select>
+  1748→          </div>
+  1749→        </div>
+  1750→        <DialogFooter className="gap-2">
+  1751→          <Button variant="ghost" size="sm" onClick={onClose} className="text-slate-400 hover:text-slate-200">Cancel</Button>
+  1752→          <Button
+  1753→            size="sm"
+  1754→            onClick={() => void submit()}
+  1755→            disabled={submitting}
+  1756→            className="gap-1.5 border border-emerald-500/40 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30 hover:text-emerald-100"
+  1757→          >
+  1758→            {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+  1759→            Create
+  1760→          </Button>
+  1761→        </DialogFooter>
+  1762→      </DialogContent>
+  1763→    </Dialog>
+  1764→  )
+  1765→}
+  1766→
+  1767→function OrganizationMembersDialog({
+  1768→  org,
+  1769→  onClose,
+  1770→}: {
+  1771→  org: OrganizationView | null
+  1772→  onClose: () => void
+  1773→}) {
+  1774→  const [members, setMembers] = React.useState<OrgMemberView[]>([])
+  1775→  const [loading, setLoading] = React.useState(false)
+  1776→  const [error, setError] = React.useState<string | null>(null)
+  1777→
+  1778→  React.useEffect(() => {
+  1779→    if (!org) {
+  1780→      setMembers([])
+  1781→      setError(null)
+  1782→      return
+  1783→    }
+  1784→    let cancelled = false
+  1785→    setLoading(true)
+  1786→    setError(null)
+  1787→    apiGet<OrgMemberView[]>(`/api/admin/organizations/${org.organizationId}/members`)
+  1788→      .then((data) => {
+  1789→        if (!cancelled) setMembers([...data])
+  1790→      })
+  1791→      .catch((e) => {
+  1792→        if (!cancelled) {
+  1793→          setMembers([])
+  1794→          setError(e instanceof Error ? e.message : 'Members endpoint unavailable')
+  1795→        }
+  1796→      })
+  1797→      .finally(() => {
+  1798→        if (!cancelled) setLoading(false)
+  1799→      })
+  1800→    return () => {
+  1801→      cancelled = true
+  1802→    }
+  1803→  }, [org])
+  1804→
+  1805→  return (
+  1806→    <Dialog open={!!org} onOpenChange={(o) => !o && onClose()}>
+  1807→      <DialogContent className="border-slate-800 bg-slate-950 text-zinc-100 sm:max-w-lg">
+  1808→        <DialogHeader>
+  1809→          <DialogTitle className="flex items-center gap-2 font-mono text-base">
+  1810→            <Building2 className="h-4 w-4 text-cyan-400" /> {org?.name}
+  1811→          </DialogTitle>
+  1812→          <DialogDescription className="text-xs text-slate-400">
+  1813→            {org && (
+  1814→              <span className="font-mono">
+  1815→                {org.slug} · {org.type} · {org.memberCount} member{org.memberCount === 1 ? '' : 's'}
+  1816→              </span>
+  1817→            )}
+  1818→          </DialogDescription>
+  1819→        </DialogHeader>
+  1820→        {org && (
+  1821→          <div className="space-y-3">
+  1822→            <code className="block break-all rounded-md border border-slate-800 bg-slate-900/60 px-2.5 py-1.5 font-mono text-[11px] text-cyan-300">
+  1823→              {org.organizationId}
+  1824→            </code>
+  1825→            {loading ? (
+  1826→              <div className="space-y-2">
+  1827→                {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
+  1828→              </div>
+  1829→            ) : error ? (
+  1830→              <div className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
+  1831→                <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
+  1832→                <p className="font-mono text-[11px] text-amber-200">{error}. Showing recorded member count: {org.memberCount}.</p>
+  1833→              </div>
+  1834→            ) : members.length === 0 ? (
+  1835→              <EmptyState icon={Users} message="No members projected yet for this organization." />
+  1836→            ) : (
+  1837→              <ScrollArea className="max-h-[40vh] pr-2">
+  1838→                <div className="space-y-1.5">
+  1839→                  {members.map((m) => (
+  1840→                    <div key={m.userId} className="flex items-center justify-between rounded-md border border-slate-800 bg-slate-900/60 px-3 py-2">
+  1841→                      <div className="min-w-0">
+  1842→                        <MonoCell className="text-emerald-200">{m.displayName || m.email || m.userId}</MonoCell>
+  1843→                        {m.email && m.email !== m.displayName && (
+  1844→                          <MonoCell className="block text-[10px] text-slate-500">{m.email}</MonoCell>
+  1845→                        )}
+  1846→                      </div>
+  1847→                      <div className="flex shrink-0 items-center gap-2">
+  1848→                        <StatusBadge status={m.status} />
+  1849→                        <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 font-mono text-[10px] text-cyan-300">
+  1850→                          {m.roleId}
+  1851→                        </Badge>
+  1852→                      </div>
+  1853→                    </div>
+  1854→                  ))}
+  1855→                </div>
+  1856→              </ScrollArea>
+  1857→            )}
+  1858→          </div>
+  1859→        )}
+  1860→      </DialogContent>
+  1861→    </Dialog>
+  1862→  )
+  1863→}
+  1864→
+  1865→// ─── Tab 4: Roles & Permissions ───────────────────────────────────────────────
+  1866→
+  1867→function RolesPermissionsTab() {
+  1868→  const [roles, setRoles] = React.useState<RoleData[]>([])
+  1869→  const [permissions, setPermissions] = React.useState<PermissionData[]>([])
+  1870→  const [loadingRoles, setLoadingRoles] = React.useState(true)
+  1871→  const [loadingPerms, setLoadingPerms] = React.useState(true)
+  1872→  const [rolesError, setRolesError] = React.useState<string | null>(null)
+  1873→  const [permsError, setPermsError] = React.useState<string | null>(null)
+  1874→  const [createRoleOpen, setCreateRoleOpen] = React.useState(false)
+  1875→  const [createPermOpen, setCreatePermOpen] = React.useState(false)
+  1876→
+  1877→  const loadRoles = React.useCallback(async () => {
+  1878→    setLoadingRoles(true)
+  1879→    setRolesError(null)
+  1880→    try {
+  1881→      const data = await apiGet<RoleData[]>('/api/admin/roles')
+  1882→      setRoles([...data])
+  1883→    } catch (e) {
+  1884→      setRolesError(e instanceof Error ? e.message : 'Failed to load roles')
+  1885→    } finally {
+  1886→      setLoadingRoles(false)
+  1887→    }
+  1888→  }, [])
+  1889→
+  1890→  const loadPerms = React.useCallback(async () => {
+  1891→    setLoadingPerms(true)
+  1892→    setPermsError(null)
+  1893→    try {
+  1894→      const data = await apiGet<PermissionData[]>('/api/admin/permissions')
+  1895→      setPermissions([...data])
+  1896→    } catch (e) {
+  1897→      setPermsError(e instanceof Error ? e.message : 'Failed to load permissions')
+  1898→    } finally {
+  1899→      setLoadingPerms(false)
+  1900→    }
+  1901→  }, [])
+  1902→
+  1903→  React.useEffect(() => {
+  1904→    void loadRoles()
+  1905→    void loadPerms()
+  1906→  }, [loadRoles, loadPerms])
+  1907→
+  1908→  const permsByResource = React.useMemo(() => {
+  1909→    const map = new Map<string, PermissionData[]>()
+  1910→    for (const p of permissions) {
+  1911→      const arr = map.get(p.resource) ?? []
+  1912→      arr.push(p)
+  1913→      map.set(p.resource, arr)
+  1914→    }
+  1915→    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]))
+  1916→  }, [permissions])
+  1917→
+  1918→  return (
+  1919→    <section className="space-y-6">
+  1920→      <SectionHeader
+  1921→        icon={Shield}
+  1922→        title="Roles &amp; Permissions"
+  1923→        description="Data-driven RBAC model — roles bundle permissions, permissions are scoped by resource+action."
+  1924→        endpoint="GET /api/admin/roles · GET /api/admin/permissions"
+  1925→      />
+  1926→
+  1927→      <div className="grid gap-6 lg:grid-cols-2">
+  1928→        {/* Roles */}
+  1929→        <Card className="border-slate-800 bg-slate-900/40 ring-1 ring-inset ring-slate-800/60">
+  1930→          <CardHeader className="flex-row items-center justify-between gap-2 space-y-0 pb-3">
+  1931→            <div className="flex items-center gap-2">
+  1932→              <div className="flex h-7 w-7 items-center justify-center rounded-md border border-emerald-500/30 bg-emerald-500/10">
+  1933→                <Shield className="h-3.5 w-3.5 text-emerald-400" />
+  1934→              </div>
+  1935→              <CardTitle className="font-mono text-sm text-zinc-100">Roles ({roles.length})</CardTitle>
+  1936→            </div>
+  1937→            <Button
+  1938→              size="sm"
+  1939→              variant="outline"
+  1940→              onClick={() => setCreateRoleOpen(true)}
+  1941→              className="h-7 gap-1 border-emerald-500/40 bg-emerald-500/10 px-2 text-[11px] text-emerald-300 hover:bg-emerald-500/20"
+  1942→            >
+  1943→              <Plus className="h-3 w-3" /> New Role
+  1944→            </Button>
+  1945→          </CardHeader>
+  1946→          <CardContent className="space-y-2">
+  1947→            {rolesError ? (
+  1948→              <ErrorBanner message={rolesError} onRetry={() => void loadRoles()} />
+  1949→            ) : loadingRoles ? (
+  1950→              Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)
+  1951→            ) : roles.length === 0 ? (
+  1952→              <EmptyState icon={Shield} message="No roles defined." />
+  1953→            ) : (
+  1954→              roles.map((role) => (
+  1955→                <div key={role.id} className="rounded-md border border-slate-800 bg-slate-950/40 px-3 py-2.5">
+  1956→                  <div className="flex items-center justify-between gap-2">
+  1957→                    <div className="flex items-center gap-2">
+  1958→                      <Shield className="h-3.5 w-3.5 text-emerald-400" />
+  1959→                      <MonoCell className="text-emerald-200">{role.name}</MonoCell>
+  1960→                      {role.isSystem && (
+  1961→                        <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 font-mono text-[9px] text-amber-300">
+  1962→                          system
+  1963→                        </Badge>
+  1964→                      )}
+  1965→                    </div>
+  1966→                    <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 font-mono text-[10px] text-cyan-300">
+  1967→                      {role.permissions.length} perms
+  1968→                    </Badge>
+  1969→                  </div>
+  1970→                  <p className="mt-1 text-[11px] text-slate-400">{role.description}</p>
+  1971→                  <code className="mt-1 block truncate font-mono text-[10px] text-slate-600">{role.id}</code>
+  1972→                </div>
+  1973→              ))
+  1974→            )}
+  1975→          </CardContent>
+  1976→        </Card>
+  1977→
+  1978→        {/* Permissions */}
+  1979→        <Card className="border-slate-800 bg-slate-900/40 ring-1 ring-inset ring-slate-800/60">
+  1980→          <CardHeader className="flex-row items-center justify-between gap-2 space-y-0 pb-3">
+  1981→            <div className="flex items-center gap-2">
+  1982→              <div className="flex h-7 w-7 items-center justify-center rounded-md border border-cyan-500/30 bg-cyan-500/10">
+  1983→                <ShieldCheck className="h-3.5 w-3.5 text-cyan-400" />
+  1984→              </div>
+  1985→              <CardTitle className="font-mono text-sm text-zinc-100">Permissions ({permissions.length})</CardTitle>
+  1986→            </div>
+  1987→            <Button
+  1988→              size="sm"
+  1989→              variant="outline"
+  1990→              onClick={() => setCreatePermOpen(true)}
+  1991→              className="h-7 gap-1 border-cyan-500/40 bg-cyan-500/10 px-2 text-[11px] text-cyan-300 hover:bg-cyan-500/20"
+  1992→            >
+  1993→              <Plus className="h-3 w-3" /> New Permission
+  1994→            </Button>
+  1995→          </CardHeader>
+  1996→          <CardContent>
+  1997→            {permsError ? (
+  1998→              <ErrorBanner message={permsError} onRetry={() => void loadPerms()} />
+  1999→            ) : loadingPerms ? (
+  2000→              <div className="space-y-3">
+
+[showing lines 1-2000 of 3185; use offset=2001 with limit to continue reading]

@@ -1,0 +1,912 @@
+     1→/**
+     2→ * Authentication commands.
+     3→ *
+     4→ * RegisterUser → VerifyEmail → Login → RefreshSession → Logout
+     5→ * ChangePassword / RequestPasswordReset / ResetPassword
+     6→ *
+     7→ * Each handler loads the UserAggregate from the UserRepository, mutates it via
+     8→ * the aggregate's domain methods, persists via the repository (which appends
+     9→ * events to the EventStore + Outbox in the same transaction), and returns a
+    10→ * typed Result.
+    11→ *
+    12→ * Session lifecycle (Login, Logout, RefreshSession) is delegated to the
+    13→ * AppSessionStore + AppJwtService ports — these are infrastructure adapters
+    14→ * selected by the composition root.
+    15→ */
+    16→
+    17→import { Result } from '@/shared/types/result';
+    18→import { createId } from '@/shared/ids';
+    19→import type { CommandWithPayload } from '@/application/commands/command';
+    20→import type { CommandHandler } from '@/application/handlers/command-handler';
+    21→import type { UserRepository, WaitlistRepository } from '@/domain/identity/repositories';
+    22→import type { DeviceRepository, DeviceData } from '@/domain/identity/repositories';
+    23→import type { AuditLogRepository, AuditLogEntry } from '@/domain/identity/repositories';
+    24→import type {
+    25→  PasswordHasher,
+    26→  MfaProvider,
+    27→  BreachChecker,
+    28→} from '@/domain/identity/services/identity-ports';
+    29→import type { RiskEngine } from '@/domain/identity/services/risk-engine';
+    30→import type {
+    31→  AppSession,
+    32→  AppSessionStore,
+    33→  AppJwtService,
+    34→  EmailService,
+    35→  TokenStore,
+    36→  TokenType,
+    37→  GeoLocation,
+    38→  GeoLocationService,
+    39→  LoginThrottle,
+    40→} from '@/application/ports/identity-ports';
+    41→import { Email } from '@/domain/value-objects';
+    42→import { Username } from '@/domain/value-objects';
+    43→import { Country } from '@/domain/value-objects';
+    44→import { DisplayName } from '@/domain/identity/value-objects/display-name';
+    45→import { Timezone } from '@/domain/identity/value-objects/timezone';
+    46→import { Locale } from '@/domain/identity/value-objects/locale';
+    47→import { PasswordHash } from '@/domain/identity/value-objects/password-hash';
+    48→import { UserAggregate } from '@/domain/identity/aggregates/user-aggregate';
+    49→import {
+    50→  ValidationError,
+    51→  BusinessRuleError,
+    52→  NotFoundError,
+    53→  AuthorizationError,
+    54→} from '@/domain/shared/errors';
+    55→
+    56→// ─── Register User ─────────────────────────────────────────────────────────
+    57→
+    58→export interface RegisterUserPayload {
+    59→  readonly email: string;
+    60→  readonly username: string;
+    61→  readonly displayName: string;
+    62→  readonly password: string;
+    63→  readonly country: string;
+    64→  readonly timezone: string;
+    65→  readonly locale: string;
+    66→}
+    67→
+    68→export interface RegisterUserResult {
+    69→  readonly userId: string;
+    70→  readonly verificationToken: string;
+    71→}
+    72→
+    73→export class RegisterUserCommand implements CommandWithPayload<RegisterUserPayload> {
+    74→  readonly commandType = 'RegisterUser';
+    75→  constructor(
+    76→    public readonly payload: RegisterUserPayload,
+    77→    public readonly correlationId?: string,
+    78→    public readonly causationId?: string,
+    79→    public readonly idempotencyKey?: string,
+    80→    public readonly userId?: string,
+    81→  ) {}
+    82→}
+    83→
+    84→export class RegisterUserHandler
+    85→  implements CommandHandler<RegisterUserCommand, RegisterUserResult>
+    86→{
+    87→  readonly commandType = 'RegisterUser';
+    88→
+    89→  constructor(
+    90→    private readonly userRepo: UserRepository,
+    91→    private readonly waitlistRepo: WaitlistRepository,
+    92→    private readonly passwordHasher: PasswordHasher,
+    93→    private readonly breachChecker: BreachChecker | null,
+    94→    private readonly emailService: EmailService,
+    95→    private readonly tokenStore: TokenStore,
+    96→  ) {}
+    97→
+    98→  async execute(command: RegisterUserCommand): Promise<Result<RegisterUserResult>> {
+    99→    const { email, username, displayName, password, country, timezone, locale } =
+   100→      command.payload;
+   101→
+   102→    // Validate value objects (throws ValidationError).
+   103→    let emailVo: Email;
+   104→    let usernameVo: Username;
+   105→    let displayNameVo: DisplayName;
+   106→    let countryVo: Country;
+   107→    let timezoneVo: Timezone;
+   108→    let localeVo: Locale;
+   109→    try {
+   110→      emailVo = new Email(email);
+   111→      usernameVo = new Username(username);
+   112→      displayNameVo = new DisplayName(displayName);
+   113→      countryVo = new Country(country);
+   114→      timezoneVo = new Timezone(timezone);
+   115→      localeVo = new Locale(locale);
+   116→    } catch (e) {
+   117→      return Result.fail(e as Error);
+   118→    }
+   119→
+   120→    // Uniqueness checks.
+   121→    if (await this.userRepo.emailExists(emailVo.value)) {
+   122→      return Result.fail(
+   123→        new BusinessRuleError('Email is already registered', 'EMAIL_TAKEN'),
+   124→      );
+   125→    }
+   126→    if (await this.userRepo.usernameExists(usernameVo.value)) {
+   127→      return Result.fail(
+   128→        new BusinessRuleError('Username is already taken', 'USERNAME_TAKEN'),
+   129→      );
+   130→    }
+   131→
+   132→    // Password strength + breach check.
+   133→    const strength = this.passwordHasher.validateStrength(password);
+   134→    if (!strength.valid) {
+   135→      return Result.fail(
+   136→        new ValidationError(
+   137→          `Password does not meet strength requirements: ${strength.issues.join('; ')}`,
+   138→          'password',
+   139→        ),
+   140→      );
+   141→    }
+   142→    if (this.breachChecker && (await this.breachChecker.isBreached(password))) {
+   143→      return Result.fail(
+   144→        new ValidationError(
+   145→          'Password has been found in a known data breach; please choose another',
+   146→          'password',
+   147→        ),
+   148→      );
+   149→    }
+   150→
+   151→    const passwordHashStr = await this.passwordHasher.hash(password);
+   152→    let passwordHashVo: PasswordHash;
+   153→    try {
+   154→      passwordHashVo = new PasswordHash(passwordHashStr);
+   155→    } catch {
+   156→      // The hasher produced a hash that doesn't conform to our VO format.
+   157→      return Result.fail(
+   158→        new BusinessRuleError('Password hasher produced an invalid hash', 'HASH_INVALID'),
+   159→      );
+   160→    }
+   161→
+   162→    // Build the UserAggregate via the factory (raises UserCreated).
+   163→    const userId = createId('user');
+   164→    const user = UserAggregate.create({
+   165→      id: userId,
+   166→      email: emailVo,
+   167→      username: usernameVo,
+   168→      displayName: displayNameVo,
+   169→      country: countryVo,
+   170→      timezone: timezoneVo,
+   171→      locale: localeVo,
+   172→    });
+   173→    user.setPasswordHash(passwordHashVo);
+   174→
+   175→    const expectedVersion = user.version; // 0 for a new aggregate
+   176→    try {
+   177→      await this.userRepo.save(user, expectedVersion);
+   178→    } catch (e) {
+   179→      return Result.fail(e as Error);
+   180→    }
+   181→
+   182→    // Add a waitlist entry so admins can review.
+   183→    const verificationToken = createId('vfy');
+   184→    const now = new Date().toISOString();
+   185→    await this.waitlistRepo.add({
+   186→      id: createId('wl'),
+   187→      email: emailVo.value,
+   188→      username: usernameVo.value,
+   189→      status: 'pending',
+   190→      verificationToken,
+   191→      verifiedAt: null,
+   192→      approvalNotes: null,
+   193→      rejectionReason: null,
+   194→      invitedById: null,
+   195→      createdAt: now,
+   196→      updatedAt: now,
+   197→    });
+   198→
+   199→    // Issue an email-verification token and email the link.
+   200→    await this.tokenStore.issue({
+   201→      type: 'email_verification' as TokenType,
+   202→      userId,
+   203→      email: emailVo.value,
+   204→      ttlSeconds: 24 * 60 * 60,
+   205→    });
+   206→    try {
+   207→      await this.emailService.sendVerificationEmail(emailVo.value, verificationToken);
+   208→    } catch {
+   209→      // Email failures are non-fatal — the user can request a resend.
+   210→    }
+   211→
+   212→    return Result.ok({ userId, verificationToken });
+   213→  }
+   214→}
+   215→
+   216→// ─── Verify Email ──────────────────────────────────────────────────────────
+   217→
+   218→export interface VerifyEmailPayload {
+   219→  readonly userId: string;
+   220→  readonly verificationToken: string;
+   221→}
+   222→
+   223→export class VerifyEmailCommand implements CommandWithPayload<VerifyEmailPayload> {
+   224→  readonly commandType = 'VerifyEmail';
+   225→  constructor(
+   226→    public readonly payload: VerifyEmailPayload,
+   227→    public readonly correlationId?: string,
+   228→    public readonly causationId?: string,
+   229→    public readonly idempotencyKey?: string,
+   230→    public readonly userId?: string,
+   231→  ) {}
+   232→}
+   233→
+   234→export class VerifyEmailHandler
+   235→  implements CommandHandler<VerifyEmailCommand, { userId: string }>
+   236→{
+   237→  readonly commandType = 'VerifyEmail';
+   238→
+   239→  constructor(
+   240→    private readonly userRepo: UserRepository,
+   241→    private readonly waitlistRepo: WaitlistRepository,
+   242→    private readonly tokenStore: TokenStore,
+   243→  ) {}
+   244→
+   245→  async execute(command: VerifyEmailCommand): Promise<Result<{ userId: string }>> {
+   246→    const { userId, verificationToken } = command.payload;
+   247→
+   248→    const tokenData = await this.tokenStore.consume(
+   249→      verificationToken,
+   250→      'email_verification' as TokenType,
+   251→    );
+   252→    if (!tokenData || tokenData.userId !== userId) {
+   253→      return Result.fail(
+   254→        new AuthorizationError('Invalid or expired verification token', 'verify_email'),
+   255→      );
+   256→    }
+   257→
+   258→    const user = await this.userRepo.getById(userId);
+   259→    if (!user) {
+   260→      return Result.fail(new NotFoundError('User not found', 'User', userId));
+   261→    }
+   262→
+   263→    if (user.emailVerified) {
+   264→      return Result.fail(
+   265→        new BusinessRuleError('Email is already verified', 'EMAIL_ALREADY_VERIFIED'),
+   266→      );
+   267→    }
+   268→
+   269→    const expectedVersion = user.version;
+   270→    try {
+   271→      user.verifyEmail();
+   272→    } catch (e) {
+   273→      return Result.fail(e as Error);
+   274→    }
+   275→
+   276→    try {
+   277→      await this.userRepo.save(user, expectedVersion);
+   278→    } catch (e) {
+   279→      return Result.fail(e as Error);
+   280→    }
+   281→
+   282→    // Update the waitlist entry status.
+   283→    const entry = await this.waitlistRepo.getByEmail(user.email);
+   284→    if (entry) {
+   285→      await this.waitlistRepo.update(entry.id, {
+   286→        status: 'email_verified',
+   287→        verifiedAt: new Date().toISOString(),
+   288→        updatedAt: new Date().toISOString(),
+   289→      });
+   290→    }
+   291→
+   292→    return Result.ok({ userId });
+   293→  }
+   294→}
+   295→
+   296→// ─── Login ─────────────────────────────────────────────────────────────────
+   297→
+   298→export interface LoginPayload {
+   299→  readonly email: string;
+   300→  readonly password: string;
+   301→  readonly deviceFingerprint: string;
+   302→  readonly ipAddress: string;
+   303→  readonly userAgent: string;
+   304→}
+   305→
+   306→export interface LoginResult {
+   307→  readonly userId: string;
+   308→  readonly sessionId: string;
+   309→  readonly token: string;
+   310→  readonly refreshToken: string;
+   311→  readonly expiresAt: number;
+   312→  readonly requiresMfa: boolean;
+   313→  readonly mfaChallenge?: string;
+   314→}
+   315→
+   316→export class LoginCommand implements CommandWithPayload<LoginPayload> {
+   317→  readonly commandType = 'Login';
+   318→  constructor(
+   319→    public readonly payload: LoginPayload,
+   320→    public readonly correlationId?: string,
+   321→    public readonly causationId?: string,
+   322→    public readonly idempotencyKey?: string,
+   323→    public readonly userId?: string,
+   324→  ) {}
+   325→}
+   326→
+   327→const SESSION_TTL_SECONDS = 60 * 60 * 24; // 24h
+   328→const REFRESH_TTL_SECONDS = 60 * 60 * 24 * 30; // 30d
+   329→const MAX_LOGIN_FAILURES = 10;
+   330→
+   331→export class LoginHandler implements CommandHandler<LoginCommand, LoginResult> {
+   332→  readonly commandType = 'Login';
+   333→
+   334→  constructor(
+   335→    private readonly userRepo: UserRepository,
+   336→    private readonly passwordHasher: PasswordHasher,
+   337→    private readonly sessionStore: AppSessionStore,
+   338→    private readonly jwtService: AppJwtService,
+   339→    private readonly deviceRepo: DeviceRepository,
+   340→    private readonly riskEngine: RiskEngine | null,
+   341→    private readonly geoService: GeoLocationService | null,
+   342→    private readonly throttle: LoginThrottle | null,
+   343→    private readonly mfaProvider: MfaProvider | null,
+   344→    private readonly auditRepo: AuditLogRepository | null,
+   345→  ) {}
+   346→
+   347→  async execute(command: LoginCommand): Promise<Result<LoginResult>> {
+   348→    const { email, password, deviceFingerprint, ipAddress, userAgent } = command.payload;
+   349→
+   350→    const user = await this.userRepo.getByEmail(email.toLowerCase());
+   351→
+   352→    // Always run the password verify to avoid timing oracles — but only treat
+   353→    // the result as success if the user actually exists.
+   354→    const storedHash = user?.passwordHash ?? '$argon2id$invalid$invalid';
+   355→    const passwordOk = await this.passwordHasher.verify(password, storedHash);
+   356→
+   357→    if (!user || !passwordOk) {
+   358→      if (this.throttle && user) {
+   359→        await this.throttle.recordFailure(user.email);
+   360→      }
+   361→      return Result.fail(
+   362→        new AuthorizationError('Invalid email or password', 'login'),
+   363→      );
+   364→    }
+   365→
+   366→    if (user.isDeleted) {
+   367→      return Result.fail(new AuthorizationError('Account is deleted', 'login'));
+   368→    }
+   369→    if (user.isSuspended) {
+   370→      return Result.fail(
+   371→        new AuthorizationError('Account is suspended; contact support', 'login'),
+   372→      );
+   373→    }
+   374→    if (!user.isActive) {
+   375→      return Result.fail(
+   376→        new AuthorizationError('Account is pending approval', 'login'),
+   377→      );
+   378→    }
+   379→
+   380→    // Throttle: lockout after too many failures.
+   381→    if (this.throttle) {
+   382→      const failures = await this.throttle.getFailureCount(user.email);
+   383→      if (failures >= MAX_LOGIN_FAILURES) {
+   384→        return Result.fail(
+   385→          new AuthorizationError('Too many failed attempts; try again later', 'login'),
+   386→        );
+   387→      }
+   388→    }
+   389→
+   390→    // Risk assessment.
+   391→    let requiresMfa = user.mfaEnabled;
+   392→    let geo: GeoLocation | null = null;
+   393→    if (this.geoService) {
+   394→      geo = await this.geoService.lookup(ipAddress);
+   395→    }
+   396→    if (this.riskEngine) {
+   397→      const devices = await this.deviceRepo.getByUserId(user.id);
+   398→      const assessment = this.riskEngine.assess({
+   399→        userId: user.id,
+   400→        deviceFingerprint,
+   401→        ipAddress,
+   402→        geoLocation: geo,
+   403→        loginTime: Date.now(),
+   404→        userTimezone: user.timezone,
+   405→        knownDevices: devices.map((d) => ({
+   406→          fingerprint: d.fingerprint,
+   407→          trusted: d.trusted,
+   408→          lastSeenAt: d.lastSeenAt,
+   409→        })),
+   410→        recentFailedAttempts: this.throttle
+   411→          ? await this.throttle.getFailureCount(user.email)
+   412→          : 0,
+   413→      });
+   414→      if (assessment.requiresMfa) requiresMfa = true;
+   415→    }
+   416→
+   417→    // MFA step-up: if required, return a challenge instead of a session.
+   418→    if (requiresMfa && this.mfaProvider) {
+   419→      const challenge = createId('mfa');
+   420→      return Result.ok({
+   421→        userId: user.id,
+   422→        sessionId: '',
+   423→        token: '',
+   424→        refreshToken: '',
+   425→        expiresAt: 0,
+   426→        requiresMfa: true,
+   427→        mfaChallenge: challenge,
+   428→      });
+   429→    }
+   430→
+   431→    // Mint the session token + refresh token.
+   432→    const now = Date.now();
+   433→    const token = await this.jwtService.sign(
+   434→      {
+   435→        sub: user.id,
+   436→        email: user.email,
+   437→        username: user.username,
+   438→        roles: user.roles.map((r) => r.roleId),
+   439→        iat: Math.floor(now / 1000),
+   440→      },
+   441→      SESSION_TTL_SECONDS,
+   442→    );
+   443→    const refreshToken = createId('rfr');
+   444→
+   445→    const session = await this.sessionStore.create({
+   446→      userId: user.id,
+   447→      token,
+   448→      refreshToken,
+   449→      device: userAgent,
+   450→      ipAddress,
+   451→      userAgent,
+   452→      expiresAt: now + SESSION_TTL_SECONDS * 1000,
+   453→      refreshExpiresAt: now + REFRESH_TTL_SECONDS * 1000,
+   454→      metadata: { deviceFingerprint },
+   455→    });
+   456→
+   457→    // Upsert the device record.
+   458→    await this.upsertDevice(user.id, deviceFingerprint, ipAddress, userAgent);
+   459→
+   460→    // Reset the failure counter after a successful login.
+   461→    if (this.throttle) {
+   462→      await this.throttle.reset(user.email);
+   463→    }
+   464→
+   465→    // Audit.
+   466→    if (this.auditRepo) {
+   467→      await this.auditRepo.append(this.buildAuditEntry(user.id, 'user.login', ipAddress, userAgent));
+   468→    }
+   469→
+   470→    return Result.ok({
+   471→      userId: user.id,
+   472→      sessionId: session.id,
+   473→      token,
+   474→      refreshToken,
+   475→      expiresAt: session.expiresAt,
+   476→      requiresMfa: false,
+   477→    });
+   478→  }
+   479→
+   480→  private async upsertDevice(
+   481→    userId: string,
+   482→    fingerprint: string,
+   483→    ipAddress: string,
+   484→    userAgent: string,
+   485→  ): Promise<void> {
+   486→    const existing = await this.deviceRepo.getByFingerprint(userId, fingerprint);
+   487→    const now = new Date().toISOString();
+   488→    if (existing) {
+   489→      await this.deviceRepo.update(existing.id, {
+   490→        lastSeenAt: now,
+   491→        ipAddress,
+   492→      });
+   493→      return;
+   494→    }
+   495→    const device: DeviceData = {
+   496→      id: createId('device'),
+   497→      userId,
+   498→      name: userAgent.slice(0, 120),
+   499→      browser: userAgent,
+   500→      os: '',
+   501→      ipAddress,
+   502→      location: null,
+   503→      fingerprint,
+   504→      riskScore: 0,
+   505→      trusted: false,
+   506→      firstSeenAt: now,
+   507→      lastSeenAt: now,
+   508→      revokedAt: null,
+   509→    };
+   510→    await this.deviceRepo.save(device);
+   511→  }
+   512→
+   513→  private buildAuditEntry(
+   514→    actorId: string,
+   515→    action: string,
+   516→    ipAddress: string,
+   517→    userAgent: string,
+   518→  ): AuditLogEntry {
+   519→    return {
+   520→      id: createId('aud'),
+   521→      action,
+   522→      actorId,
+   523→      actorType: 'user',
+   524→      targetType: 'User',
+   525→      targetId: actorId,
+   526→      timestamp: new Date().toISOString(),
+   527→      ipAddress,
+   528→      userAgent,
+   529→      metadata: {},
+   530→      correlationId: null,
+   531→    };
+   532→  }
+   533→}
+   534→
+   535→// ─── Logout ────────────────────────────────────────────────────────────────
+   536→
+   537→export interface LogoutPayload {
+   538→  readonly sessionId: string;
+   539→}
+   540→
+   541→export class LogoutCommand implements CommandWithPayload<LogoutPayload> {
+   542→  readonly commandType = 'Logout';
+   543→  constructor(
+   544→    public readonly payload: LogoutPayload,
+   545→    public readonly correlationId?: string,
+   546→    public readonly causationId?: string,
+   547→    public readonly idempotencyKey?: string,
+   548→    public readonly userId?: string,
+   549→  ) {}
+   550→}
+   551→
+   552→export class LogoutHandler implements CommandHandler<LogoutCommand, { sessionId: string }> {
+   553→  readonly commandType = 'Logout';
+   554→
+   555→  constructor(private readonly sessionStore: AppSessionStore) {}
+   556→
+   557→  async execute(command: LogoutCommand): Promise<Result<{ sessionId: string }>> {
+   558→    const { sessionId } = command.payload;
+   559→    const session = await this.sessionStore.get(sessionId);
+   560→    if (!session) {
+   561→      // Idempotent: already gone.
+   562→      return Result.ok({ sessionId });
+   563→    }
+   564→    await this.sessionStore.revoke(sessionId);
+   565→    return Result.ok({ sessionId });
+   566→  }
+   567→}
+   568→
+   569→// ─── Refresh Session ───────────────────────────────────────────────────────
+   570→
+   571→export interface RefreshSessionPayload {
+   572→  readonly refreshToken: string;
+   573→}
+   574→
+   575→export interface RefreshSessionResult {
+   576→  readonly sessionId: string;
+   577→  readonly token: string;
+   578→  readonly refreshToken: string;
+   579→  readonly expiresAt: number;
+   580→}
+   581→
+   582→export class RefreshSessionCommand implements CommandWithPayload<RefreshSessionPayload> {
+   583→  readonly commandType = 'RefreshSession';
+   584→  constructor(
+   585→    public readonly payload: RefreshSessionPayload,
+   586→    public readonly correlationId?: string,
+   587→    public readonly causationId?: string,
+   588→    public readonly idempotencyKey?: string,
+   589→    public readonly userId?: string,
+   590→  ) {}
+   591→}
+   592→
+   593→export class RefreshSessionHandler
+   594→  implements CommandHandler<RefreshSessionCommand, RefreshSessionResult>
+   595→{
+   596→  readonly commandType = 'RefreshSession';
+   597→
+   598→  constructor(
+   599→    private readonly sessionStore: AppSessionStore,
+   600→    private readonly jwtService: AppJwtService,
+   601→    private readonly userRepo: UserRepository,
+   602→  ) {}
+   603→
+   604→  async execute(command: RefreshSessionCommand): Promise<Result<RefreshSessionResult>> {
+   605→    const { refreshToken } = command.payload;
+   606→    // Look up the session by refresh token. Session store implementations
+   607→    // SHOULD index by both the access token and the refresh token via
+   608→    // `getByToken`; the composition root is responsible for choosing an
+   609→    // adapter that satisfies this contract.
+   610→    const session = await this.sessionStore.getByToken(refreshToken);
+   611→    if (!session) {
+   612→      return Result.fail(new AuthorizationError('Invalid refresh token', 'refresh'));
+   613→    }
+   614→    if (session.refreshToken && session.refreshToken !== refreshToken) {
+   615→      return Result.fail(new AuthorizationError('Invalid refresh token', 'refresh'));
+   616→    }
+   617→
+   618→    if (session.revokedAt !== undefined) {
+   619→      return Result.fail(new AuthorizationError('Session revoked', 'refresh'));
+   620→    }
+   621→    if (session.refreshExpiresAt !== undefined && session.refreshExpiresAt < Date.now()) {
+   622→      return Result.fail(new AuthorizationError('Refresh token expired', 'refresh'));
+   623→    }
+   624→
+   625→    const user = await this.userRepo.getById(session.userId);
+   626→    if (!user || !user.isActive) {
+   627→      return Result.fail(new AuthorizationError('Account is not active', 'refresh'));
+   628→    }
+   629→
+   630→    const now = Date.now();
+   631→    const newToken = await this.jwtService.sign(
+   632→      {
+   633→        sub: user.id,
+   634→        email: user.email,
+   635→        username: user.username,
+   636→        roles: user.roles.map((r) => r.roleId),
+   637→        iat: Math.floor(now / 1000),
+   638→      },
+   639→      SESSION_TTL_SECONDS,
+   640→    );
+   641→    const newRefresh = createId('rfr');
+   642→    const updated = await this.sessionStore.refresh(
+   643→      session.id,
+   644→      newToken,
+   645→      now + SESSION_TTL_SECONDS * 1000,
+   646→    );
+   647→
+   648→    return Result.ok({
+   649→      sessionId: session.id,
+   650→      token: newToken,
+   651→      refreshToken: newRefresh,
+   652→      expiresAt: updated.expiresAt,
+   653→    });
+   654→  }
+   655→}
+   656→
+   657→// ─── Change Password ───────────────────────────────────────────────────────
+   658→
+   659→export interface ChangePasswordPayload {
+   660→  readonly userId: string;
+   661→  readonly currentPassword: string;
+   662→  readonly newPassword: string;
+   663→}
+   664→
+   665→export class ChangePasswordCommand implements CommandWithPayload<ChangePasswordPayload> {
+   666→  readonly commandType = 'ChangePassword';
+   667→  constructor(
+   668→    public readonly payload: ChangePasswordPayload,
+   669→    public readonly correlationId?: string,
+   670→    public readonly causationId?: string,
+   671→    public readonly idempotencyKey?: string,
+   672→    public readonly userId?: string,
+   673→  ) {}
+   674→}
+   675→
+   676→export class ChangePasswordHandler
+   677→  implements CommandHandler<ChangePasswordCommand, { userId: string }>
+   678→{
+   679→  readonly commandType = 'ChangePassword';
+   680→
+   681→  constructor(
+   682→    private readonly userRepo: UserRepository,
+   683→    private readonly passwordHasher: PasswordHasher,
+   684→    private readonly breachChecker: BreachChecker | null,
+   685→    private readonly sessionStore: AppSessionStore | null,
+   686→  ) {}
+   687→
+   688→  async execute(command: ChangePasswordCommand): Promise<Result<{ userId: string }>> {
+   689→    const { userId, currentPassword, newPassword } = command.payload;
+   690→
+   691→    const user = await this.userRepo.getById(userId);
+   692→    if (!user) {
+   693→      return Result.fail(new NotFoundError('User not found', 'User', userId));
+   694→    }
+   695→    if (!user.passwordHash) {
+   696→      return Result.fail(
+   697→        new BusinessRuleError('User has no password set', 'NO_PASSWORD_SET'),
+   698→      );
+   699→    }
+   700→
+   701→    const currentOk = await this.passwordHasher.verify(currentPassword, user.passwordHash);
+   702→    if (!currentOk) {
+   703→      return Result.fail(new AuthorizationError('Current password is incorrect', 'change_password'));
+   704→    }
+   705→
+   706→    const strength = this.passwordHasher.validateStrength(newPassword);
+   707→    if (!strength.valid) {
+   708→      return Result.fail(
+   709→        new ValidationError(
+   710→          `Password does not meet strength requirements: ${strength.issues.join('; ')}`,
+   711→          'newPassword',
+   712→        ),
+   713→      );
+   714→    }
+   715→    if (newPassword === currentPassword) {
+   716→      return Result.fail(
+   717→        new ValidationError('New password must differ from current', 'newPassword'),
+   718→      );
+   719→    }
+   720→    if (this.breachChecker && (await this.breachChecker.isBreached(newPassword))) {
+   721→      return Result.fail(
+   722→        new ValidationError(
+   723→          'New password has been found in a known data breach; please choose another',
+   724→          'newPassword',
+   725→        ),
+   726→      );
+   727→    }
+   728→
+   729→    const newHashStr = await this.passwordHasher.hash(newPassword);
+   730→    let newHashVo: PasswordHash;
+   731→    try {
+   732→      newHashVo = new PasswordHash(newHashStr);
+   733→    } catch {
+   734→      return Result.fail(
+   735→        new BusinessRuleError('Password hasher produced an invalid hash', 'HASH_INVALID'),
+   736→      );
+   737→    }
+   738→
+   739→    const expectedVersion = user.version;
+   740→    try {
+   741→      user.changePassword(newHashVo, userId);
+   742→    } catch (e) {
+   743→      return Result.fail(e as Error);
+   744→    }
+   745→    try {
+   746→      await this.userRepo.save(user, expectedVersion);
+   747→    } catch (e) {
+   748→      return Result.fail(e as Error);
+   749→    }
+   750→
+   751→    // Revoke all other sessions for this user so they have to log in again.
+   752→    if (this.sessionStore) {
+   753→      await this.sessionStore.revokeAllForUser(userId);
+   754→    }
+   755→
+   756→    return Result.ok({ userId });
+   757→  }
+   758→}
+   759→
+   760→// ─── Request Password Reset ────────────────────────────────────────────────
+   761→
+   762→export interface RequestPasswordResetPayload {
+   763→  readonly email: string;
+   764→}
+   765→
+   766→export class RequestPasswordResetCommand
+   767→  implements CommandWithPayload<RequestPasswordResetPayload>
+   768→{
+   769→  readonly commandType = 'RequestPasswordReset';
+   770→  constructor(
+   771→    public readonly payload: RequestPasswordResetPayload,
+   772→    public readonly correlationId?: string,
+   773→    public readonly causationId?: string,
+   774→    public readonly idempotencyKey?: string,
+   775→    public readonly userId?: string,
+   776→  ) {}
+   777→}
+   778→
+   779→export class RequestPasswordResetHandler
+   780→  implements CommandHandler<RequestPasswordResetCommand, { requested: true }>
+   781→{
+   782→  readonly commandType = 'RequestPasswordReset';
+   783→
+   784→  constructor(
+   785→    private readonly userRepo: UserRepository,
+   786→    private readonly tokenStore: TokenStore,
+   787→    private readonly emailService: EmailService,
+   788→  ) {}
+   789→
+   790→  async execute(
+   791→    command: RequestPasswordResetCommand,
+   792→  ): Promise<Result<{ requested: true }>> {
+   793→    const { email } = command.payload;
+   794→    // Always return success — never reveal whether the email is registered.
+   795→    const user = await this.userRepo.getByEmail(email.toLowerCase());
+   796→    if (!user) {
+   797→      return Result.ok({ requested: true });
+   798→    }
+   799→
+   800→    const token = createId('rst');
+   801→    await this.tokenStore.issue({
+   802→      type: 'password_reset' as TokenType,
+   803→      userId: user.id,
+   804→      email: user.email,
+   805→      ttlSeconds: 60 * 60, // 1h
+   806→    });
+   807→    try {
+   808→      await this.emailService.sendPasswordResetEmail(user.email, token);
+   809→    } catch {
+   810→      // Email failures are non-fatal; user can retry.
+   811→    }
+   812→    return Result.ok({ requested: true });
+   813→  }
+   814→}
+   815→
+   816→// ─── Reset Password ────────────────────────────────────────────────────────
+   817→
+   818→export interface ResetPasswordPayload {
+   819→  readonly token: string;
+   820→  readonly newPassword: string;
+   821→}
+   822→
+   823→export class ResetPasswordCommand implements CommandWithPayload<ResetPasswordPayload> {
+   824→  readonly commandType = 'ResetPassword';
+   825→  constructor(
+   826→    public readonly payload: ResetPasswordPayload,
+   827→    public readonly correlationId?: string,
+   828→    public readonly causationId?: string,
+   829→    public readonly idempotencyKey?: string,
+   830→    public readonly userId?: string,
+   831→  ) {}
+   832→}
+   833→
+   834→export class ResetPasswordHandler
+   835→  implements CommandHandler<ResetPasswordCommand, { userId: string }>
+   836→{
+   837→  readonly commandType = 'ResetPassword';
+   838→
+   839→  constructor(
+   840→    private readonly userRepo: UserRepository,
+   841→    private readonly passwordHasher: PasswordHasher,
+   842→    private readonly breachChecker: BreachChecker | null,
+   843→    private readonly tokenStore: TokenStore,
+   844→    private readonly sessionStore: AppSessionStore | null,
+   845→  ) {}
+   846→
+   847→  async execute(command: ResetPasswordCommand): Promise<Result<{ userId: string }>> {
+   848→    const { token, newPassword } = command.payload;
+   849→
+   850→    const tokenData = await this.tokenStore.consume(
+   851→      token,
+   852→      'password_reset' as TokenType,
+   853→    );
+   854→    if (!tokenData) {
+   855→      return Result.fail(
+   856→        new AuthorizationError('Invalid or expired reset token', 'reset_password'),
+   857→      );
+   858→    }
+   859→
+   860→    const user = await this.userRepo.getById(tokenData.userId);
+   861→    if (!user) {
+   862→      return Result.fail(new NotFoundError('User not found', 'User', tokenData.userId));
+   863→    }
+   864→
+   865→    const strength = this.passwordHasher.validateStrength(newPassword);
+   866→    if (!strength.valid) {
+   867→      return Result.fail(
+   868→        new ValidationError(
+   869→          `Password does not meet strength requirements: ${strength.issues.join('; ')}`,
+   870→          'newPassword',
+   871→        ),
+   872→      );
+   873→    }
+   874→    if (this.breachChecker && (await this.breachChecker.isBreached(newPassword))) {
+   875→      return Result.fail(
+   876→        new ValidationError(
+   877→          'Password has been found in a known data breach; please choose another',
+   878→          'newPassword',
+   879→        ),
+   880→      );
+   881→    }
+   882→
+   883→    const newHashStr = await this.passwordHasher.hash(newPassword);
+   884→    let newHashVo: PasswordHash;
+   885→    try {
+   886→      newHashVo = new PasswordHash(newHashStr);
+   887→    } catch {
+   888→      return Result.fail(
+   889→        new BusinessRuleError('Password hasher produced an invalid hash', 'HASH_INVALID'),
+   890→      );
+   891→    }
+   892→
+   893→    const expectedVersion = user.version;
+   894→    try {
+   895→      user.changePassword(newHashVo, 'system');
+   896→    } catch (e) {
+   897→      return Result.fail(e as Error);
+   898→    }
+   899→    try {
+   900→      await this.userRepo.save(user, expectedVersion);
+   901→    } catch (e) {
+   902→      return Result.fail(e as Error);
+   903→    }
+   904→
+   905→    if (this.sessionStore) {
+   906→      await this.sessionStore.revokeAllForUser(user.id);
+   907→    }
+   908→
+   909→    return Result.ok({ userId: user.id });
+   910→  }
+   911→}
+   912→

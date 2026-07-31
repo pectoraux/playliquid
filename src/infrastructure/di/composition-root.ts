@@ -161,6 +161,43 @@ import {
   ListRolesHandler, ListPermissionsHandler,
 } from '@/application/queries/identity/role-queries';
 
+// Launch & Scale: Infrastructure
+import { registerLaunchEvents } from '@/domain/launch/events';
+import { BetaCohortRepositoryImpl } from '@/infrastructure/launch/beta-cohort-repository-impl';
+import { PrismaFeedbackRepository } from '@/infrastructure/launch/prisma-feedback-repository';
+import { PrismaValidationRunRepository } from '@/infrastructure/launch/prisma-validation-run-repository';
+import { PrismaReconciliationRepository } from '@/infrastructure/launch/prisma-reconciliation-repository';
+import { PrismaSessionReplayRepository } from '@/infrastructure/launch/prisma-session-replay-repository';
+import { PrismaBugRepository } from '@/infrastructure/launch/prisma-bug-repository';
+import { PrismaPerformanceMetricRepository } from '@/infrastructure/launch/prisma-performance-metric-repository';
+import { PrismaReconciliationSource } from '@/infrastructure/launch/reconciliation-source';
+import { PrismaBetaCohortReadModelStore } from '@/infrastructure/launch/beta-cohort-read-model-store';
+import { BetaCohortProjector } from '@/infrastructure/launch/beta-cohort-projector';
+import { createPlatformValidationSuites } from '@/infrastructure/launch/validation-suites';
+import { ReconciliationService } from '@/domain/launch/services/reconciliation-service';
+import { ValidationSuiteRunner } from '@/domain/launch/services/validation-suite';
+
+// Launch & Scale: Commands and queries
+import { LAUNCH_COMMAND_SCHEMAS, LAUNCH_QUERY_SCHEMAS } from '@/application/commands/launch/schemas';
+import {
+  CreateCohortHandler, InviteParticipantHandler, AcceptInvitationHandler, RevokeInvitationHandler,
+} from '@/application/commands/launch/beta-commands';
+import { SubmitFeedbackHandler, TriageFeedbackHandler } from '@/application/commands/launch/feedback-commands';
+import { StartValidationRunHandler, CompleteValidationRunHandler } from '@/application/commands/launch/validation-commands';
+import { RunReconciliationHandler } from '@/application/commands/launch/reconciliation-commands';
+import { ReportBugHandler, ResolveBugHandler, AssignBugHandler } from '@/application/commands/launch/bug-commands';
+import { RecordMetricHandler } from '@/application/commands/launch/performance-commands';
+import { RecordSessionHandler } from '@/application/commands/launch/session-replay-commands';
+import {
+  GetCohortHandler, ListCohortsHandler, GetCohortParticipantsHandler,
+} from '@/application/queries/launch/beta-queries';
+import { ListFeedbackHandler, GetFeedbackStatsHandler } from '@/application/queries/launch/feedback-queries';
+import { GetValidationRunHandler, ListValidationRunsHandler, GetLatestValidationHandler } from '@/application/queries/launch/validation-queries';
+import { GetReconciliationHandler, ListReconciliationsHandler, GetLatestReconciliationHandler } from '@/application/queries/launch/reconciliation-queries';
+import { ListBugsHandler, GetBugStatsHandler } from '@/application/queries/launch/bug-queries';
+import { GetPerformanceSummaryHandler, ListMetricsHandler } from '@/application/queries/launch/performance-queries';
+import { ListSessionReplaysHandler } from '@/application/queries/launch/session-replay-queries';
+
 // Example command/query handlers
 import { PublishGameHandler, PublishGameSchema } from '@/application/commands/publish-game';
 import { GetGameHandler } from '@/application/queries/get-game';
@@ -190,6 +227,7 @@ export async function buildContainer(): Promise<DIContainer> {
   // Register domain events first.
   registerAllEvents();
   registerIdentityEvents();
+  registerLaunchEvents();
 
   const c = new DIContainer();
 
@@ -359,7 +397,35 @@ export async function buildContainer(): Promise<DIContainer> {
     engine.register(new OrganizationProjector());
     engine.register(new AuditLogProjector());
     engine.register(new ApiKeyProjector());
+    // Launch projectors
+    engine.register(new BetaCohortProjector());
     return engine;
+  });
+
+  // ─── Launch & Scale Infrastructure ─────────────────────────────────────────
+  c.singleton('BetaCohortRepository', (c) => new BetaCohortRepositoryImpl(
+    c.resolve(TOKENS.EventStore), c.resolve(TOKENS.SnapshotStore), c.resolve(TOKENS.OutboxRepository),
+  ));
+  c.singleton('FeedbackRepository', () => new PrismaFeedbackRepository());
+  c.singleton('ValidationRunRepository', () => new PrismaValidationRunRepository());
+  c.singleton('ReconciliationRepository', () => new PrismaReconciliationRepository());
+  c.singleton('SessionReplayRepository', () => new PrismaSessionReplayRepository());
+  c.singleton('BugRepository', () => new PrismaBugRepository());
+  c.singleton('PerformanceMetricRepository', () => new PrismaPerformanceMetricRepository());
+  c.singleton('ReconciliationSource', (c) => new PrismaReconciliationSource(c.resolve(TOKENS.EventStore)));
+  c.singleton('BetaCohortReadModelStore', () => new PrismaBetaCohortReadModelStore());
+  c.singleton('ReconciliationService', (c) => new ReconciliationService(c.resolve('ReconciliationSource')));
+  c.singleton('ValidationSuiteRunner', (c) => {
+    const runner = new ValidationSuiteRunner();
+    const suites = createPlatformValidationSuites({
+      eventStore: c.resolve(TOKENS.EventStore),
+      reconciliationService: c.resolve('ReconciliationService'),
+      rateLimiter: c.resolve(TOKENS.RateLimiter),
+      storageProvider: c.resolve(TOKENS.StorageProvider),
+      sessionReplayRepo: c.resolve('SessionReplayRepository'),
+    });
+    for (const suite of suites) runner.registerSuite(suite);
+    return runner;
   });
 
   // ─── Backup ────────────────────────────────────────────────────────────────
@@ -499,6 +565,39 @@ export async function buildContainer(): Promise<DIContainer> {
     bus.register(new CreatePermissionHandler(permRepo));
     bus.register(new DeletePermissionHandler(permRepo));
 
+    // Launch & Scale: Beta cohort commands
+    const cohortRepo = c.resolve('BetaCohortRepository');
+    const feedbackRepo = c.resolve('FeedbackRepository');
+    const validationRunRepo = c.resolve('ValidationRunRepository');
+    const reconciliationRepo = c.resolve('ReconciliationRepository');
+    const bugRepo = c.resolve('BugRepository');
+    const perfRepo = c.resolve('PerformanceMetricRepository');
+    const replayRepo = c.resolve('SessionReplayRepository');
+    const reconciliationService = c.resolve('ReconciliationService');
+    const validationRunner = c.resolve('ValidationSuiteRunner');
+
+    bus.register(new CreateCohortHandler(cohortRepo));
+    bus.register(new InviteParticipantHandler(cohortRepo, null));
+    bus.register(new AcceptInvitationHandler(cohortRepo, async (invId: string) => {
+      return c.resolve('BetaCohortReadModelStore').getCohortIdByInvitation(invId);
+    }));
+    bus.register(new RevokeInvitationHandler(cohortRepo));
+
+    bus.register(new SubmitFeedbackHandler(feedbackRepo));
+    bus.register(new TriageFeedbackHandler(feedbackRepo));
+
+    bus.register(new StartValidationRunHandler(validationRunRepo, validationRunner));
+    bus.register(new CompleteValidationRunHandler(validationRunRepo));
+
+    bus.register(new RunReconciliationHandler(reconciliationRepo, reconciliationService));
+
+    bus.register(new ReportBugHandler(bugRepo));
+    bus.register(new ResolveBugHandler(bugRepo));
+    bus.register(new AssignBugHandler(bugRepo));
+
+    bus.register(new RecordMetricHandler(perfRepo));
+    bus.register(new RecordSessionHandler(replayRepo));
+
     return bus;
   });
 
@@ -537,6 +636,31 @@ export async function buildContainer(): Promise<DIContainer> {
     bus.register(new ListRolesHandler(c.resolve('RoleRepository')));
     bus.register(new ListPermissionsHandler(c.resolve('PermissionRepository')));
 
+    // Launch & Scale: Query handlers
+    const cohortReadModelStore = c.resolve('BetaCohortReadModelStore');
+    bus.register(new GetCohortHandler(c.resolve('BetaCohortRepository'), cohortReadModelStore));
+    bus.register(new ListCohortsHandler(cohortReadModelStore));
+    bus.register(new GetCohortParticipantsHandler(c.resolve('BetaCohortRepository')));
+
+    bus.register(new ListFeedbackHandler(c.resolve('FeedbackRepository')));
+    bus.register(new GetFeedbackStatsHandler(c.resolve('FeedbackRepository')));
+
+    bus.register(new GetValidationRunHandler(c.resolve('ValidationRunRepository')));
+    bus.register(new ListValidationRunsHandler(c.resolve('ValidationRunRepository')));
+    bus.register(new GetLatestValidationHandler(c.resolve('ValidationRunRepository')));
+
+    bus.register(new GetReconciliationHandler(c.resolve('ReconciliationRepository')));
+    bus.register(new ListReconciliationsHandler(c.resolve('ReconciliationRepository')));
+    bus.register(new GetLatestReconciliationHandler(c.resolve('ReconciliationRepository')));
+
+    bus.register(new ListBugsHandler(c.resolve('BugRepository')));
+    bus.register(new GetBugStatsHandler(c.resolve('BugRepository')));
+
+    bus.register(new GetPerformanceSummaryHandler(c.resolve('PerformanceMetricRepository')));
+    bus.register(new ListMetricsHandler(c.resolve('PerformanceMetricRepository')));
+
+    bus.register(new ListSessionReplaysHandler(c.resolve('SessionReplayRepository')));
+
     return bus;
   });
 
@@ -550,6 +674,15 @@ export async function buildContainer(): Promise<DIContainer> {
     registerPolicy(commandType, new AllowAnyonePolicy()); // Will tighten with real auth
   }
   for (const [queryType, schema] of IDENTITY_QUERY_SCHEMAS) {
+    registerCommandValidator(queryType, new ZodValidator(schema));
+  }
+
+  // Launch & Scale: Register validators
+  for (const [commandType, schema] of LAUNCH_COMMAND_SCHEMAS) {
+    registerCommandValidator(commandType, new ZodValidator(schema));
+    registerPolicy(commandType, new AllowAnyonePolicy());
+  }
+  for (const [queryType, schema] of LAUNCH_QUERY_SCHEMAS) {
     registerCommandValidator(queryType, new ZodValidator(schema));
   }
 

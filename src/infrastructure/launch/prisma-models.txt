@@ -1,0 +1,172 @@
+# Launch Infrastructure — Prisma Models
+
+# Add the following models to prisma/schema.prisma.
+# These back the LAUNCH-3 launch & scale program infrastructure: beta cohorts
+# (event-sourced via BetaCohortAggregate, with a read model for cohortId lookups),
+# feedback pipeline, validation run history, reconciliation reports, session
+# replays (with the heavy event stream stored in the StorageProvider and only
+# summary metadata in the DB), bug reports, and the time-series performance
+# metrics feed consumed by the launch dashboard.
+
+# ─── Beta Cohort (read model; the aggregate is event-sourced) ───────────────
+
+model BetaCohort {
+  id              String   @id                    # aggregate id (= stream key)
+  cohortId        String   @unique                # public-facing cohort id
+  name            String
+  phase           String   @default("closed_beta")  # alpha | closed_beta | open_beta
+  maxParticipants Int      @default(50)
+  createdById     String
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([phase])
+  @@index([active])
+  @@index([createdById])
+}
+
+model CohortParticipant {
+  id            String   @id @default(cuid())
+  cohortId      String                            # FK → BetaCohort.cohortId
+  invitationId  String   @unique                 # one row per invitation
+  userId        String
+  email         String
+  role          String   @default("player")      # player | creator
+  status        String   @default("pending")     # pending | accepted | revoked | expired
+  invitedAt     String                            # ISO 8601
+  acceptedAt    String?                           # ISO 8601 (nullable until accepted)
+  expiresAt     String                            # ISO 8601
+  createdAt     DateTime @default(now())
+
+  @@index([cohortId])
+  @@index([userId])
+  @@index([status])
+  @@index([email])
+}
+
+# ─── Feedback Records (CRUD, not event-sourced) ─────────────────────────────
+
+model FeedbackRecord {
+  id           String   @id
+  cohortId     String
+  userId       String
+  category     String   # bug | feature_request | experience | performance | other
+  severity     String   # low | medium | high | critical
+  title        String
+  description  String
+  status       String   @default("new")          # new | triaged | in_progress | resolved | wont_fix
+  assignedTo   String?
+  triagedBy    String?
+  triagedAt    String?
+  triageNotes  String?
+  createdAt    String                             # ISO 8601
+  updatedAt    String                             # ISO 8601
+
+  @@index([cohortId])
+  @@index([userId])
+  @@index([status])
+  @@index([severity])
+  @@index([category])
+  @@index([createdAt])
+}
+
+# ─── Validation Run History ─────────────────────────────────────────────────
+
+model ValidationRun {
+  id            String   @id
+  suite         String                              # suite name (e.g. "ledger-integrity")
+  status        String   @default("running")        # running | passed | failed | partial
+  totalChecks   Int      @default(0)
+  passedChecks  Int      @default(0)
+  failedChecks  Int      @default(0)
+  durationMs    Int      @default(0)
+  triggeredBy   String                              # user id or "system"
+  startedAt     String                              # ISO 8601
+  completedAt   String?                             # ISO 8601 (nullable until completion)
+  report        String   @default("{}")             # JSON-encoded structured report
+
+  @@index([suite])
+  @@index([status])
+  @@index([startedAt])
+}
+
+# ─── Reconciliation Reports ─────────────────────────────────────────────────
+
+model ReconciliationReport {
+  id                    String   @id
+  period                String                     # human-readable period label
+  status                String                     # balanced | discrepancy | error
+  expectedBalance       Int      @default(0)       # sum of expected balances (cents)
+  actualBalance         Int      @default(0)       # sum of read-model balances (cents)
+  discrepancy           Int      @default(0)       # actual - expected
+  totalTransactions     Int      @default(0)
+  matchedTransactions   Int      @default(0)
+  unmatchedTransactions Int      @default(0)
+  completedAt           String                     # ISO 8601
+  details               String   @default("{}")    # JSON: unmatchedAccounts[], errors[]
+
+  @@index([period])
+  @@index([status])
+  @@index([completedAt])
+}
+
+# ─── Session Replays (metadata only — event stream lives in StorageProvider) ─
+
+model SessionReplay {
+  id              String   @id
+  sessionId       String                        # original session id
+  userId          String
+  cohortId        String
+  durationSeconds Int      @default(0)
+  eventCount      Int      @default(0)          # rrweb event count
+  recordedAt      String                        # ISO 8601
+  storageKey      String                        # StorageProvider key for the rrweb stream
+  metadata        String   @default("{}")       # JSON: client info, viewport, etc.
+
+  @@index([cohortId])
+  @@index([userId])
+  @@index([recordedAt])
+}
+
+# ─── Bug Reports ────────────────────────────────────────────────────────────
+
+model BugReport {
+  id          String   @id
+  title       String
+  description String
+  severity    String                              # low | medium | high | critical
+  category    String                              # free-form (UI, gameplay, performance, ...)
+  status      String   @default("open")           # open | in_progress | fixed | wont_fix | duplicate | invalid
+  reportedBy  String
+  cohortId    String
+  assignedTo  String?
+  resolvedBy  String?
+  resolvedAt  String?
+  resolution  String?                             # fixed | wont_fix | duplicate | invalid
+  createdAt   String                              # ISO 8601
+  updatedAt   String                              # ISO 8601
+
+  @@index([severity])
+  @@index([status])
+  @@index([cohortId])
+  @@index([assignedTo])
+  @@index([createdAt])
+}
+
+# ─── Performance Metrics (time-series) ──────────────────────────────────────
+
+model PerformanceMetric {
+  id        String   @id @default(cuid())
+  metric    String                              # e.g. "http.p95_latency_ms"
+  value     Float
+  unit      String                              # "ms", "count", "%", etc.
+  threshold Float?                              # configured threshold (null = no threshold)
+  status    String   @default("ok")             # ok | warning | critical
+  timestamp String                              # ISO 8601
+  metadata  String   @default("{}")             # JSON: tags, source, etc.
+
+  @@index([metric, timestamp])
+  @@index([status])
+  @@index([timestamp])
+}

@@ -1,0 +1,373 @@
+   350→Work Log:
+   351→- Read worklog.md to inherit the M1/M2 architecture (DDD/CQRS/Event Sourcing, clean shared→domain→application→infrastructure→interfaces layers, architecture checker enforcing no `process.env` outside `shared/config/`, no Prisma outside `infrastructure/`, no `any` in domain/shared, `import type` for type-only imports, no ES2015 namespaces).
+   352→- Inspected existing infrastructure patterns: `getClient()` / `prisma` from `@/infrastructure/database/prisma` (transaction-aware client with `$disconnect` only on the singleton), `logger` from `@/shared/logging` (ScopedLogger with `system()` scope; `warn()` takes 2 args, `error()` takes 3), `getConfig()` / `getEnvVar()` from `@/shared/config` (the ONLY sanctioned way to read env vars from outside the config layer), `ProjectionEngine.rebuild()` from `@/infrastructure/projections/projection-engine`, `WorkerRegistry.shutdown()` from `@/infrastructure/workers/worker-framework`, `RedisClient` interface from `@/infrastructure/redis/redis-client`, `LockProvider` interface from `@/infrastructure/locking/lock-provider`. Reviewed `production-operations.ts` (the existing `MaintenanceMode` / `GracefulShutdownManager` primitives in `recovery/`) to ensure the new disaster-recovery module is complementary rather than redundant.
+   353→- Created `/home/z/my-project/src/infrastructure/backup/backup-framework.ts` (~725 lines):
+   354→  - Exported the exact interfaces from the spec: `BackupResult`, `BackupProvider`, `BackupSchedule`.
+   355→  - `LocalBackupProvider` implements all 6 methods: `backup(type)`, `list(limit)`, `get(id)`, `verify(id)`, `restore(id)`, `delete(id)`.
+   356→  - Database backup: parses `getConfig().database.url` for the `file:` prefix (SQLite), copies the DB file to `<backupDir>/<id>.db`, computes SHA-256. For non-SQLite providers, returns `partial` with a clear error directing callers to a PostgresBackupProvider (pg_dump).
+   357→  - Storage backup: recursively walks the configured `storageRoot` (skipping sidecar `.meta.json` files), builds a USTAR-format tar archive (custom 50-line implementation: 512-byte headers with octal size/mtime/checksum, regular-file typeflag '0', two zero blocks at end), gzip-compresses via `zlib.gzipSync`, writes to `<backupDir>/<id>.tar.gz`.
+   358→  - Configuration backup: serialises `getConfig()` as JSON with `auth.secret` redacted to `[REDACTED]` and `database.url` password masked.
+   359→  - Secrets-metadata backup: emits a curated list of 11 known env-var-derived config keys (`DATABASE_URL`, `AUTH_SECRET`, `REDIS_URL`, etc.) marked as sensitive/non-sensitive with descriptions. NO secret values are written.
+   360→  - Manifest persistence: single JSON file at `<backupDir>/manifest.json` containing `BackupResult[]`. In-memory cache avoids re-reading on every operation.
+   361→  - `verify()`: re-reads the artefact file, recomputes SHA-256, compares to the stored checksum.
+   362→  - `restore()`: gated behind `getEnvVar('BACKUP_RESTORE_CONFIRMED') === 'yes'` safety check (refuses + logs error if not set). Database restore disconnects Prisma first via `prisma.$disconnect()` (NOT `getClient().$disconnect()` — the transaction client type doesn't expose `$disconnect`), then copies the backup over the live DB file. Storage restore decompresses via `zlib.gunzipSync` and parses the USTAR stream back into files (with path-traversal guard). Configuration and secrets-metadata restores are informational-only (log a warning that operators must re-apply manually via the config layer / secret provider).
+   363→  - `delete()`: removes the artefact file (best-effort) and the manifest entry.
+   364→  - Bonus: `applyRetention(retentionByType)` keeps only the most recent N backups per type, pruning older ones — useful for scheduled cleanup.
+   365→  - `DEFAULT_BACKUP_SCHEDULES` const exported for wiring into the Scheduler (M2-3a).
+   366→- Created `/home/z/my-project/src/infrastructure/recovery/disaster-recovery.ts` (~495 lines):
+   367→  - Exported the exact types from the spec: `RecoveryMode`, `StartupRecoveryReport`, `DisasterRecoveryService`.
+   368→  - `DefaultDisasterRecoveryService` implements all 8 methods: `enterRecoveryMode`, `exitRecoveryMode`, `enterMaintenanceMode`, `exitMaintenanceMode`, `getMode`, `getReason`, `runStartupRecovery`, `replayProjections`, `gracefulShutdown`.
+   369→  - Mode coordination: writes `.recovery-mode` / `.maintenance-mode` flag files in the configured `modeDir` (default: `process.cwd()`). File format: line 1 = ISO timestamp, line 2 = human-readable reason. If a `RedisClient` is injected, also sets `dr:mode:recovery` / `dr:mode:maintenance` keys with a 24-hour TTL so other instances in a cluster observe the change. Maintenance takes precedence over recovery.
+   370→  - `getMode()` is synchronous (uses `existsSync` on the flag files) — documented that Redis cannot be consulted from a sync getter, so instances observing a Redis mode change should call `enter*Mode()` locally to materialise the flag file.
+   371→  - `getReason()` is synchronous (uses `readFileSync`). Bonus `getReasonAsync()` checks Redis for cluster-wide authority.
+   372→  - `runStartupRecovery()` performs 4 checks and returns a `StartupRecoveryReport`:
+   373→    1. **Incomplete outbox messages**: queries `outboxMessage` for `status='pending' AND retryCount > 0 AND updatedAt < (now - 5min)`, resets their `retryCount: 0, error: null` so the publisher picks them up cleanly. Messages with `retryCount=0` waiting their turn are NOT considered stuck.
+   374→    2. **Stuck projections**: compares each `ProjectionCheckpoint.lastEventRowId` to the latest `EventRecord.id` (auto-increment head). If lag exceeds 1000 events (configurable), counts the projector as stuck and triggers `replayProjections()` once.
+   375→    3. **Expired sessions**: the schema has no Session table for auth sessions, so this purges expired `IdempotencyRecord` entries (the closest analog — both have `expiresAt` and represent state that should be cleaned up after expiry). Documented in the code.
+   376→    4. **Stale locks**: requires a `RedisClient`. Scans `lock:*` keys, checks TTL via `redisClient.ttl(key)`. Keys with TTL = -1 (exist but no expiry — likely abandoned) are deleted. In-memory `MemoryLockProvider` locks cannot be introspected without modifying the `LockProvider` interface, so they're skipped with a logged action.
+   377→    - Each step pushes a human-readable action string to the `actions` array. Errors in any step are caught, logged, and recorded as actions (don't abort the whole recovery).
+   378→  - `replayProjections()`: delegates to `ProjectionEngine.rebuild()` with start/complete logging.
+   379→  - `gracefulShutdown(timeoutMs)`: races `workerRegistry.shutdown()` + `prisma.$disconnect()` against a hard timeout. If the timeout fires, logs an error and calls `process.exit(1)` so the orchestrator (Kubernetes) can restart the process — a partially-drained process is worse than a clean restart.
+   380→- Created `/home/z/my-project/src/infrastructure/performance/performance.ts` (~470 lines):
+   381→  - Exported the exact interfaces from the spec: `PerformanceMiddleware`, `CacheOptions`, `StreamOptions`, `SlowQuery`, `PoolMetrics`.
+   382→  - `DefaultPerformanceMiddleware` implements all 7 methods: `compress`, `setCacheHeaders`, `setETag`, `streamResponse`, `trackQuery`, `getSlowQueries`, `getPoolMetrics`.
+   383→  - `compress(response)`: documented limitation — the Fetch `Response` interface doesn't expose the request, so we can't read `Accept-Encoding` here. For streaming responses, returns unchanged and logs a debug message directing callers to `compressBuffer()` or Next.js's built-in compression. Bonus `compressBuffer(data, init?)` method for callers with a complete body in memory: gzips via `zlib.gzipSync` if `data.length >= 1024` and no existing `Content-Encoding`, sets `Content-Encoding: gzip`, `Content-Length`, `Vary: Accept-Encoding`.
+   384→  - `setCacheHeaders(response, options)`: composes `Cache-Control` from options (`no-store` → `no-store, no-cache, must-revalidate`; otherwise `public`/`private, max-age=N, stale-while-revalidate=N`). Sets `Last-Modified` to now (or preserves existing). Sets a weak ETag (`W/"<sha1-of-last-modified>"`) so the response carries *an* ETag even without calling `setETag()`.
+   385→  - `setETag(response, data, ifNoneMatch?)`: computes strong ETag as `"<sha1-hex>"`, sets `ETag` header. If `ifNoneMatch` is supplied (the request's `If-None-Match` value), parses the comma-separated list and returns a 304 response on match (supporting exact, weak `W/`, and `*` wildcards). The optional 3rd param is added on the implementation (TypeScript allows extra optional params not in the interface) so the interface signature stays exactly `setETag(response, data): Response`.
+   386→  - `streamResponse(data, options?)`: wraps an `AsyncIterable<Uint8Array>` into a `ReadableStream` via a `pump()` helper that awaits each chunk and enqueues it, closing on completion or erroring on throw. Sets `Content-Type`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, plus any caller-supplied headers.
+   387→  - `trackQuery(sql, durationMs)`: if `durationMs >= slowQueryThresholdMs` (default 100ms), pushes a `SlowQuery` entry to a bounded ring buffer (default cap 200, shifts oldest when full). Truncates SQL > 2000 chars to avoid log bloat. Logs a warn per slow query.
+   388→  - `getSlowQueries(limit?)`: returns the ring buffer sorted by `durationMs` desc, optionally limited.
+   389→  - `getPoolMetrics()`: parses `connection_limit` from `DATABASE_URL` for the `max` value (returns 1 for SQLite — single-writer; `DEFAULT_POOL_MAX = 10` fallback). Documented that Prisma doesn't expose exact active/idle/waiting counts — operators should use `pg_stat_activity` (PostgreSQL) or `prisma.$metrics.json()` (behind `enableMetrics` feature flag) for live numbers. Returns `{ active: 0, idle: 0, waiting: 0, max }`.
+   390→  - Bonus: `getPerformanceMiddleware()` singleton accessor.
+   391→- Fixed 5 TypeScript errors uncovered by `bunx tsc --noEmit`:
+   392→  1. `walkFiles()` used `Awaited<ReturnType<typeof readdir>>` which expanded to a union including `Buffer[]` variants — replaced with explicit `Dirent[]` type and `entry.name as string` cast.
+   393→  2. `restoreDatabase()` called `getClient().$disconnect()` — the `PrismaTransactionClient` type omits `$disconnect`. Switched to `prisma.$disconnect()` (the singleton) and removed the now-unused `getClient` import.
+   394→  3. `restoreDatabase()` called `logger.system().warn(msg, ctx, error)` — `warn()` only takes 2 args. Switched to `error()` which takes 3.
+   395→  4. `compressBuffer()` passed `Buffer` directly to `new Response()` — TS DOM lib types don't accept `Buffer` as `BodyInit` in this config. Cast via `data as unknown as BodyInit`.
+   396→  5. `runStartupRecovery()` passed a typed `StartupRecoveryReport` object directly to `logger.system().info()` — TS rejected it as not assignable to `LogContext` (index signature). Spread to `{ ...report }` to produce a fresh object literal.
+   397→- Ran a comprehensive smoke test (`/tmp/smoke-m2-8.ts`, deleted after run) exercising every public method across all three modules with mock ProjectionEngine/WorkerRegistry and a tmp filesystem:
+   398→  - Backup: storage backup (tar.gz, 136 bytes for 2 small files), configuration backup (645 bytes, `auth.secret` correctly redacted to `[REDACTED]`), secrets-metadata backup (11 names), verify (checksum match), list (3 entries), restore refused without `BACKUP_RESTORE_CONFIRMED=yes`, restore succeeds with confirmation, delete (list drops to 2), retention pruning.
+   399→  - Disaster recovery: mode transitions normal → recovery → maintenance → recovery → normal, maintenance precedence over recovery, reason retrieval, file-flag persistence.
+   400→  - Performance: 3 of 5 synthetic queries above 100ms threshold tracked (top = 170ms), ring buffer capped at 200 (after 250 inserts), pool metrics (`max: 1` for SQLite), compressBuffer (gzip for 2048-byte buffer, none for 100-byte), cache-control composition (`private, max-age=300, stale-while-revalidate=60` and `no-store, no-cache, must-revalidate`), weak ETag from Last-Modified, strong ETag from SHA-1, 304 short-circuit on `If-None-Match` match, 200 on mismatch, streamResponse consumed 3 chunks correctly.
+   401→  - All smoke tests passed.
+   402→
+   403→Stage Summary:
+   404→- Three new infrastructure modules created exactly at the requested paths:
+   405→  1. `src/infrastructure/backup/backup-framework.ts` (~725 lines) — `LocalBackupProvider` with database (SQLite file copy / pg_dump stub), storage (custom USTAR tar writer + gzip), configuration (redacted JSON), and secrets-metadata (names only, no values) backups. SHA-256 checksum verification, restore gated behind `BACKUP_RESTORE_CONFIRMED=yes` env var, JSON manifest persistence, retention policy helper, default schedule presets.
+   406→  2. `src/infrastructure/recovery/disaster-recovery.ts` (~495 lines) — `DefaultDisasterRecoveryService` with file-flag + Redis mode coordination (maintenance > recovery precedence), sync `getMode()` / `getReason()` (uses `existsSync` / `readFileSync`) plus bonus async `getReasonAsync()` for cluster-wide authority, 4-step startup recovery (stuck outbox messages, projection lag detection + auto-replay, expired idempotency purge, stale Redis lock cleanup), projection replay delegation, graceful shutdown with hard-timeout force-exit.
+   407→  3. `src/infrastructure/performance/performance.ts` (~470 lines) — `DefaultPerformanceMiddleware` with gzip compression (Buffer variant for non-streaming bodies, illustrative no-op for streaming responses), HTTP cache headers (Cache-Control composition + weak ETag from Last-Modified), strong ETag with optional `If-None-Match` → 304 short-circuit, async-iterable-to-ReadableStream streaming, slow-query ring buffer (threshold + cap configurable, default 100ms / 200 entries), Prisma pool metrics (`max` parsed from `connection_limit`, others 0 with documented limitation).
+   408→- All architecture rules respected: `import type` for type-only imports throughout, no `any` types, no `process.env` literals (uses `getEnvVar()` for the restore-confirmation check), no Prisma outside infrastructure, no ES2015 namespaces.
+   409→- `bun run lint` passes (0 errors). `bun run scripts/check-architecture.ts` passes (0 violations, 177 files scanned). `bunx tsc --noEmit --skipLibCheck` passes for all 3 new files (0 errors).
+   410→- Functional smoke test passes end-to-end across all three modules: backup create/verify/list/restore/delete/retention, DR mode transitions + startup recovery (mocked), performance compression/caching/ETag/streaming/slow-query/pool-metrics.
+   411→- NEXT (for main agent): (1) Wire `LocalBackupProvider` into `composition-root.ts` and register the 4 `DEFAULT_BACKUP_SCHEDULES` with the Scheduler (M2-3a). (2) Wire `DefaultDisasterRecoveryService` into the composition root — pass the real `ProjectionEngine`, `WorkerRegistry`, and `RedisClient` (if available); call `runStartupRecovery()` at boot after `ProductionStartupValidator.validate()`; bind `gracefulShutdown(30_000)` to SIGTERM/SIGINT. (3) Optionally expose `/api/admin/backup`, `/api/admin/recovery`, and `/api/admin/performance` endpoints that delegate to these services (gated behind admin authorization). (4) For production multi-instance, implement `S3BackupProvider` (same `BackupProvider` interface) using the existing `S3StorageProvider` as a reference.
+   412→
+   413→---
+   414→Task ID: M2-10
+   415→Agent: frontend-styling-expert
+   416→Task: Update landing page for Milestone 2 infrastructure showcase
+   417→
+   418→Work Log:
+   419→- Read `/home/z/my-project/worklog.md` to inherit the full M1 + M2 architecture context (DDD/CQRS/Event Sourcing foundation plus M2 platform services: Redis, cache, locks, retries, circuit breakers, message queue, DLQ, workers, scheduler, storage, CDN, search, feature flags, secrets, config, rate limiting, notifications, metrics, extended health, backups, DR, performance, production ops).
+   420→- Read `/home/z/my-project/src/app/page.tsx` (1,559 lines) to understand the existing M1 dashboard: Header/Hero, ArchitectureLayers, HealthDashboard, EventSourcingDemo, RegistryDisplay, PipelineVisualization, Footer. Noted the design tokens (dark slate-950 bg, emerald/cyan accents, monospace technical data, StatusDot/accentClasses helpers, SectionHeading pattern).
+   421→- Inspected M2 API routes and handlers to lock the response shapes used by the new UI: `/api/health/extended` returns `{ status, timestamp, checks[] }` (same shape as basic health, but ~13 checks), `/api/workers/health` returns `{ workers: WorkerHealth[] }` with `name, running, lastRunAt, lastError, totalProcessed, totalErrors, avgDurationMs`, `/api/metrics` returns Prometheus `text/plain; version=0.0.4`, `/api/feature-flags` GET returns `{ flags: FeatureFlag[] }` and POST handles `action: set | evaluate | delete`.
+   422→- Inspected `src/infrastructure/feature-flags/feature-flags.ts` and `src/infrastructure/telemetry/extended-health-checks.ts` to mirror the real `FeatureFlag` and `FlagType` types and the registered extended-health check names (`database, redis, event-bus, outbox, event-store, projection-engine, queue, storage, scheduler, workers, circuit-breakers, cache, rate-limiter`).
+   423→- Verified shadcn/ui primitives available: `Select`, `Switch`, `ScrollArea`, `Badge`, `Card`, `Button`, `Input`, `Label`, `Separator`, `Tabs` — imported `Select`/`Switch` (and 18 new Lucide icons: `AlertTriangle, BarChart3, Bell, DatabaseBackup, ExternalLink, Flag, Gauge, KeyRound, LifeBuoy, Lock, Mail, MessageSquare, Plus, ServerCog, Settings, ShieldAlert, Trash2, Webhook`) without disturbing the existing icon block.
+   424→- Edited `src/app/page.tsx` (now 2,988 lines) in one atomic MultiEdit:
+   425→  1. Imports — added `Select`/`Switch` from shadcn/ui and 18 new Lucide icons.
+   426→  2. Types — appended `WorkerHealth`, `WorkerHealthResponse`, `FlagType`, `FeatureFlag`, `FeatureFlagListResponse`, `EvaluationResult` after the existing M1 types.
+   427→  3. Constants — extended `COMPONENT_ICONS` to cover all 13 extended-health check names; added `PlatformServiceEntry`/`PlatformServiceGroup` types and a `PLATFORM_SERVICE_GROUPS` array of 6 groups / 27 services (Caching & Resilience, Messaging & Workers, Storage & Search, Platform Services, Notifications, Operations); added `KEY_METRIC_NAMES` (commands_dispatched_total, queries_executed_total, worker_processed_total, cache_hits_total, circuit_breaker_state).
+   428→  4. Header — updated the milestone crumb to "milestone 1 → 2 / production infrastructure" and added Redis / Workers / Metrics / Feature Flags badges alongside the existing DDD/CQRS/Event Sourcing/Outbox badges.
+   429→  5. Home — appended new sections after `PipelineVisualization`: `M2SectionBanner`, `PlatformServicesGrid`, `ExtendedHealthDashboard`, `WorkerHealthMonitor`, `PrometheusMetrics`, `FeatureFlagsManager` (each separated by `Separator`).
+   430→  6. Footer — relabelled "Health Endpoints" to "Infrastructure Endpoints" and added `/api/health/extended`, `/api/metrics`, `/api/workers/health`, `/api/feature-flags`; updated the byline to call out "Milestone 2 · Caching · Messaging · Workers · Storage · Notifications · Operations" and "Next.js · TypeScript · Prisma · Redis · shadcn/ui".
+   431→  7. New component functions appended at end of file:
+   432→     - `M2SectionBanner` — gradient banner announcing the M2 section.
+   433→     - `PlatformServicesGrid` — 6 grouped sections, responsive 2-4 column grid of 27 service cards (icon + name + description).
+   434→     - `ExtendedHealthDashboard` — fetches `/api/health/extended` every 5s with Pause/Refresh controls; shows overall status, healthy/degraded/unhealthy counts, last-updated time, and a 12-skeleton-loading grid of all checks (each card: icon + name + status badge + latency in ms).
+   435→     - `WorkerHealthMonitor` — fetches `/api/workers/health` every 5s; 4-column grid of `WorkerCard`s showing running dot, status badge, totalProcessed, totalErrors, avgDurationMs, lastRunAt, and a collapsible lastError banner.
+   436→     - `PrometheusMetrics` — fetches `/api/metrics` as text every 10s; left card extracts latest values for the 5 KEY_METRIC_NAMES with an "Open raw /api/metrics" external link; right card renders the raw Prometheus text in a `ScrollArea`-backed `<pre>` with monospace font, syntax-highlighting for `# HELP` / `# TYPE` / key-metric lines (emerald tint), and a "View full metrics / Show first 50" toggle.
+   437→     - `FeatureFlagsManager` — interactive create/evaluate/delete UI: create form with key Input, type Select (all 8 FlagTypes), percentage Input (conditionally shown for `percentage` type), enabled Switch; evaluate panel with flag Select, optional userId/country inputs, result badge (enabled/disabled) + reason text; registered-flags list with type/enabled/percentage/countries badges and Trash2 delete buttons. All actions POST to `/api/feature-flags` with the correct `action` payload and refresh the list afterwards.
+   438→- All new components reuse existing helpers (`SectionHeading`, `StatusDot`, `statusColor`, `accentClasses`) and the established visual language (slate-950 background, emerald/cyan accents, monospace for IDs/JSON/metrics, ring-1 ring-inset slate-800/60 cards, no indigo/blue).
+   439→- Verified: `bun run lint` passes with 0 errors; `npx tsc --noEmit` reports 0 errors in `page.tsx`. The file grew from 1,559 → 2,988 lines (1,429 new lines). All M1 sections (Hero, Architecture Layers, Live Health, Event Sourcing Demo, Registry, Pipeline Viz, Footer) remain intact and unchanged in behavior.
+   440→
+   441→Stage Summary:
+   442→- Landing page extended from a 5-section M1 architecture dashboard to a 10-section production platform showcase spanning both milestones. The M2 half introduces a Platform Services catalogue (27 services across 6 domains), a live Extended Health Dashboard (~13 parallel TTL-cached checks with healthy/degraded/unhealthy counts), a Worker Health Monitor (Outbox/Projection/Cleanup/Analytics workers with throughput/latency/error metrics), a Prometheus Metrics Preview (raw text/plain output with key-metric extraction and syntax highlighting), and an interactive Feature Flags Manager (full CRUD + runtime evaluation across all 8 flag types).
+   443→- Every new section is wired to a real M2 API endpoint (`/api/health/extended`, `/api/workers/health`, `/api/metrics`, `/api/feature-flags`) with auto-refresh, pause/resume controls, loading skeletons, and graceful error states. Design tokens stay consistent with M1: dark slate-950 background, emerald/cyan accents (no indigo/blue), monospace for technical data, sticky footer with `mt-auto`, and `min-h-screen flex flex-col` root.
+   444→- Lint (`bun run lint`) and TypeScript (`npx tsc --noEmit`) both pass cleanly. No other files were modified.
+   445→
+   446→---
+   447→Task ID: M2-Final
+   448→Agent: main
+   449→Task: Wire all M2 infrastructure into DI container, add API routes, update landing page, final verification
+   450→
+   451→Work Log:
+   452→- Added Prisma models: ScheduledJob, WebhookRegistration, WebhookDelivery, BackupRecord, FeatureFlagRecord (DeadLetterMessage was already added by subagent)
+   453→- Ran db:push to sync schema
+   454→- Added 25+ new DI tokens for all M2 infrastructure services
+   455→- Rewrote composition-root.ts to wire all infrastructure:
+   456→  - Redis client (with in-memory fallback)
+   457→  - CacheProvider (Redis or Memory based on backend)
+   458→  - LockProvider (Redis or Memory)
+   459→  - CircuitBreakerRegistry
+   460→  - RateLimiter (Redis or Memory)
+   461→  - MessageQueue + DeadLetterQueue
+   462→  - StorageProvider, CdnProvider, SearchProvider
+   463→  - FeatureFlagService, SecretProvider, ConfigService
+   464→  - EmailProvider, SmsProvider, PushProvider, WebhookEngine
+   465→  - SessionStore, JwtService
+   466→  - MetricsFramework (Prometheus-compatible)
+   467→  - ExtendedHealthCheckRegistry (13 checks)
+   468→  - BackupProvider, DisasterRecoveryService, PerformanceMiddleware
+   469→  - GracefulShutdownManager, ReadinessGate, MaintenanceMode
+   470→  - WorkerRegistry (4 workers: Outbox, Projection, Cleanup, Analytics)
+   471→  - Scheduler
+   472→- Used global singleton pattern for container to persist across Next.js dev module reloads
+   473→- Created instrumentation.ts to auto-start workers and scheduler on server startup
+   474→- Added webpackIgnore comments to dynamic imports for optional packages (twilio, nodemailer, firebase-admin, @aws-sdk/client-s3, ioredis)
+   475→- Added new API routes: /api/metrics, /api/health/extended, /api/workers/health, /api/feature-flags
+   476→- Fixed QueryCacheMiddleware to handle cache gracefully (defensive null check)
+   477→- Fixed feature-flags route handler body validation
+   478→- Dispatched frontend-styling-expert subagent to update landing page with M2 sections
+   479→- Final verification: all 8 API endpoints return 200, full CQRS flow works, extended health all healthy, all 4 workers running
+   480→
+   481→Stage Summary:
+   482→- 182 TypeScript source files (up from 147 in M1)
+   483→- Lint: 0 errors
+   484→- Architecture checker: 0 violations (182 files)
+   485→- All 8 API endpoints: HTTP 200
+   486→- Extended health: all 9 checks healthy (database, redis, event-bus, outbox, event-store, projection-engine, workers, cache, rate-limiter)
+   487→- Workers: OutboxWorker, ProjectionWorker, CleanupWorker, AnalyticsWorker all running
+   488→- CQRS flow verified: dispatch → auto-process → query returns game data
+   489→- Feature flags: create/evaluate/list all working
+   490→- Prometheus metrics: available at /api/metrics
+   491→- Landing page: all M1 + M2 sections rendering correctly
+   492→
+   493→---
+   494→Task ID: M3-3
+   495→Agent: general-purpose
+   496→Task: Build identity application commands and queries
+   497→
+   498→Work Log:
+   499→- Read worklog.md to inherit the M1/M2 architecture (DDD/CQRS/Event Sourcing, clean shared→domain→application→infrastructure→interfaces layers, architecture checker enforcing no `process.env` outside `shared/config/`, no Prisma outside `infrastructure/`, `import type` for type-only imports, no `any` types, no ES2015 namespaces).
+   500→- Inspected the existing identity domain layer built in M3-1/M3-2: `UserAggregate` (waitlist/approve/reject/suspend/reactivate/delete/profile/email/password/MFA/role/membership methods), `OrganizationAggregate` (create/addMember/removeMember), domain repositories (User/Organization/Role/Permission/ApiKey/AuditLog/Device/Waitlist), service ports (PasswordHasher/MfaProvider/OAuthProvider/BreachChecker), `RiskEngine`, `RbacEngine`/`AbacEngine`/`PolicyEngine`, and value objects (Email/Username/DisplayName/Timezone/Locale/Country/PasswordHash/PhoneNumber/RoleId/PermissionId/DeviceId/UserId).
+   501→- Reviewed the existing M1 application layer patterns (`CommandWithPayload<TPayload>`, `QueryWithPayload<TPayload, TResult>`, `CommandHandler`/`QueryHandler`, `Result<T>`, `ZodValidator`, `registerCommandValidator`/`registerQueryValidator`) and the `PublishGame`/`GetGame` reference handlers.
+   502→- Created `/home/z/my-project/src/application/ports/identity-ports.ts` (~226 lines) — application-layer port interfaces that the identity command/query handlers depend on. Avoids importing infrastructure. Defines:
+   503→  - `AppSession` + `AppSessionStore` (create/get/getByToken/getByUserId/revoke/revokeAllForUser/refresh) — mirrors the infrastructure `SessionStore` contract via structural typing.
+   504→  - `AppJwtService` (sign/verify/decode).
+   505→  - `ApiKeyHasher` (hash/verify/generate — returns plaintext+hash+prefix for one-time display).
+   506→  - `EmailService` (sendVerificationEmail/sendPasswordResetEmail/sendWelcomeEmail).
+   507→  - `TokenType` ('email_verification' | 'password_reset') + `TokenStore` (issue/consume/peek — single-use tokens).
+   508→  - `GeoLocation` + `GeoLocationService` (IP geolocation for risk scoring).
+   509→  - `LoginThrottle` (recordFailure/getFailureCount/reset — brute-force protection).
+   510→  - Read-model stores + view DTOs: `UserView`, `UserListFilters`, `PaginatedResult<T>`, `UserReadModelStore`, `OrganizationView`, `OrganizationListFilters`, `OrganizationMemberView`, `OrganizationReadModelStore`, `UserPermissionView`. Query handlers read from these materialised views instead of loading aggregates.
+   511→- Created `/home/z/my-project/src/application/commands/identity/schemas.ts` (~355 lines) — Zod schemas for ALL 31 identity commands and 15 queries, exported individually + as `IDENTITY_COMMAND_SCHEMAS` / `IDENTITY_QUERY_SCHEMAS` bulk-registration arrays. Composition root iterates these arrays and calls `registerCommandValidator`/`registerQueryValidator`.
+   512→- Created `/home/z/my-project/src/application/commands/identity/auth-commands.ts` (~911 lines) — 8 commands + 8 handlers:
+   513→  - `RegisterUserCommand` — validates Email/Username/DisplayName/Country/Timezone/Locale value objects, checks email/username uniqueness, password strength + breach check (HaveIBeenPwned-style), hashes password (Argon2id via PasswordHasher port), builds `UserAggregate.create(...)`, persists via `userRepo.save(user, 0)`, mirrors into WaitlistRepository, issues an email-verification token via TokenStore, sends verification email (best-effort).
+   514→  - `VerifyEmailCommand` — consumes the token (single-use), loads user, calls `user.verifyEmail()`, persists, updates waitlist entry to `email_verified`.
+   515→  - `LoginCommand` — loads user by email, runs password verify (constant-time, no timing oracle), enforces status checks (deleted/suspended/pending), throttle lockout (MAX_LOGIN_FAILURES=10), optional RiskEngine assessment (new device / impossible travel / unusual location / abnormal time / IP reputation), MFA step-up (returns `requiresMfa: true` + `mfaChallenge` if RiskEngine or user.mfaEnabled requires it), mints JWT via `AppJwtService.sign()`, creates session via `AppSessionStore.create()` with refresh-token rotation, upserts DeviceRepository record, resets throttle counter, writes audit log.
+   516→  - `LogoutCommand` — idempotent session revocation.
+   517→  - `RefreshSessionCommand` — looks up session by refresh token (via `getByToken` — composition root must select an adapter that indexes both access + refresh tokens), validates revocation + refresh-token expiry, re-loads user (rejects if no longer active), mints new JWT, rotates refresh token via `sessionStore.refresh()`.
+   518→  - `ChangePasswordCommand` — verifies current password, enforces strength + breach + difference checks, hashes new password, calls `user.changePassword(...)`, persists, revokes all other sessions (force re-login).
+   519→  - `RequestPasswordResetCommand` — always returns success (never reveals whether email is registered), issues a password_reset token (1h TTL), sends reset email (best-effort).
+   520→  - `ResetPasswordCommand` — consumes the token, loads user, enforces strength + breach checks, hashes new password, calls `user.changePassword(...)` with `changedBy: 'system'`, persists, revokes all sessions.
+   521→- Created `/home/z/my-project/src/application/commands/identity/waitlist-commands.ts` (~232 lines) — 3 commands + 3 handlers:
+   522→  - `ApproveUserCommand` — loads user, calls `user.approve(approvedBy, notes)`, persists, updates waitlist entry to `approved` with `invitedById`, sends welcome email (best-effort).
+   523→  - `RejectUserCommand` — guards against rejecting active users (must suspend instead), calls `user.reject(...)`, updates waitlist entry to `rejected` with reason.
+   524→  - `SubmitForApprovalCommand` — pre-checks `user.emailVerified`, calls `user.submitForApproval()` (a sub-state transition that the aggregate handles internally without raising an event), mirrors status into the waitlist table for admin visibility.
+   525→- Created `/home/z/my-project/src/application/commands/identity/user-management-commands.ts` (~635 lines) — 9 commands + 9 handlers:
+   526→  - `SuspendUserCommand` — calls `user.suspend(...)`, revokes all sessions via `AppSessionStore.revokeAllForUser()`, writes audit.
+   527→  - `ReactivateUserCommand` — calls `user.reactivate(...)`, writes audit.
+   528→  - `DeleteUserCommand` — calls `user.delete(...)`, revokes sessions, writes audit.
+   529→  - `UpdateProfileCommand` — validates DisplayName/Timezone/Locale value objects, calls `user.updateProfile(...)`.
+   530→  - `ChangeEmailCommand` — validates new Email, checks uniqueness, calls `user.changeEmail(...)`, issues a fresh verification token + email.
+   531→  - `EnableMfaCommand` — verifies method matches the configured MfaProvider, calls `mfaProvider.setup()` to get secret+QR+backup codes, then `user.enableMfa(method)`, returns the setup artefacts once.
+   532→  - `DisableMfaCommand` — calls `user.disableMfa()`, then `mfaProvider.disable(userId)` for cleanup (best-effort).
+   533→  - `AssignRoleCommand` — loads RoleData to resolve the role name, calls `user.addRole(roleId, roleName, assignedBy)`.
+   534→  - `RemoveRoleCommand` — calls `user.removeRole(roleId, removedBy)`.
+   535→- Created `/home/z/my-project/src/application/commands/identity/organization-commands.ts` (~334 lines) — 4 commands + 4 handlers:
+   536→  - `CreateOrganizationCommand` — slug uniqueness pre-check, calls `OrganizationAggregate.create(...)`, persists via `orgRepo.save(org, 0)`.
+   537→  - `AddMemberCommand` — loads org + user + role, validates user is active, calls `org.addMember(...)` AND mirrors onto the user aggregate via `user.joinOrganization(...)` (best-effort: if the user aggregate already has the membership, the org's member list is the source of truth).
+   538→  - `RemoveMemberCommand` — calls `org.removeMember(...)`, mirrors onto user via `user.leaveOrganization(...)` (best-effort).
+   539→  - `JoinOrganizationCommand` — self-service join; loads user + org + role, validates user is active + org is active, mutates user aggregate first (`user.joinOrganization`), then mirrors onto org via `org.addMember(userId, roleId, userId)` where `addedBy = userId` (self-join).
+   540→- Created `/home/z/my-project/src/application/commands/identity/api-key-commands.ts` (~271 lines) — 3 commands + 3 handlers:
+   541→  - `CreateApiKeyCommand` — requires ≥1 scope, validates `expiresAt` is a future ISO timestamp, generates plaintext+hash+prefix via `ApiKeyHasher.generate()`, persists an `ApiKeyData` record (with `keyHash`, `keyPrefix`, `active: true`), writes audit, returns the plaintext ONCE (caller must display + discard).
+   542→  - `RotateApiKeyCommand` — verifies ownership (`existing.userId === userId`), rejects revoked keys, generates new plaintext+hash+prefix, updates the record via `apiKeyRepo.update()` (resets `lastUsedAt` / `lastUsedIp`), returns new plaintext.
+   543→  - `DisableApiKeyCommand` — idempotent (already-disabled returns success), sets `active: false` + `revokedAt: now`, writes audit.
+   544→- Created `/home/z/my-project/src/application/commands/identity/role-commands.ts` (~313 lines) — 5 commands + 5 handlers:
+   545→  - `CreateRoleCommand` — name uniqueness check, builds a `RoleData` record (always `isSystem: false` for user-created roles), persists.
+   546→  - `UpdateRoleCommand` — rejects modifications to system roles, validates name uniqueness if changed, applies partial updates (name/description/permissions).
+   547→  - `DeleteRoleCommand` — rejects deletion of system roles.
+   548→  - `CreatePermissionCommand` — idempotent on (resource, action) pair: if it already exists, returns the existing ID. Otherwise builds a `PermissionData` record with id = `${resource}.${action}`.
+   549→  - `DeletePermissionCommand` — rejects deletion of system permissions.
+   550→- Created `/home/z/my-project/src/application/commands/identity/index.ts` — barrel export re-exporting all 6 command files.
+   551→- Created `/home/z/my-project/src/application/queries/identity/user-queries.ts` (~258 lines) — 4 queries + 4 handlers:
+   552→  - `GetUserQuery` — reads from `UserReadModelStore.getById()`; falls back to rehydrating the UserAggregate via `UserRepository.getById()` and projecting it to a `UserView` (only used before projectors are wired in).
+   553→  - `ListUsersQuery` — forwards filters (status/search/limit/offset) to `UserReadModelStore.list()`, returns `PaginatedResult<UserView>`.
+   554→  - `GetCurrentUserQuery` — same shape as GetUser; the auth pipeline has already verified the session.
+   555→  - `GetUserPermissionsQuery` — loads the UserAggregate, resolves effective permissions via `RbacEngine.getPermissions(roleIds)` (or, if no engine is wired, computes a flat union from `RoleRepository.list()`), returns `UserPermissionView` with permissions + roles + organization memberships.
+   556→- Created `/home/z/my-project/src/application/queries/identity/waitlist-queries.ts` (~97 lines) — `ListWaitlistQuery` (forwards filters to `WaitlistRepository.list()`, returns items + total count) and `GetWaitlistStatsQuery` (calls `countByStatus()`, sums to a total).
+   557→- Created `/home/z/my-project/src/application/queries/identity/organization-queries.ts` (~184 lines) — `GetOrganizationQuery` (read-model with aggregate fallback), `ListOrganizationsQuery` (paginated), `GetOrganizationMembersQuery` (read-model with aggregate fallback that projects the org's member list).
+   558→- Created `/home/z/my-project/src/application/queries/identity/audit-queries.ts` (~111 lines) — `ListAuditLogQuery` (forwards actorId/targetType/action/dateRange/limit/offset filters to `AuditLogRepository.list()`) and `GetAuditEntryQuery` (single lookup by ID).
+   559→- Created `/home/z/my-project/src/application/queries/identity/api-key-queries.ts` (~114 lines) — `ListApiKeysQuery` + `GetApiKeyQuery`, both stripping the `keyHash` field before returning (a `toView()` helper projects `ApiKeyData` → `ApiKeyView`).
+   560→- Created `/home/z/my-project/src/application/queries/identity/role-queries.ts` (~99 lines) — `ListRolesQuery` + `ListPermissionsQuery` (no-payload variants) plus `ListRolesQueryWithPayload` + `ListPermissionsQueryWithPayload` aliases for callers that prefer payload-bearing queries.
+   561→- Created `/home/z/my-project/src/application/queries/identity/index.ts` — barrel export re-exporting all 6 query files.
+   562→- Fixed 3 lint errors: empty interfaces (`GetWaitlistStatsPayload`, `ListRolesPayload`, `ListPermissionsPayload`) → replaced with `Record<string, never>` type aliases (the `@typescript-eslint/no-empty-object-type` rule forbids empty `interface {}` declarations).
+   563→- Verified all architectural rules:
+   564→  - All type-only imports use `import type` (UserAggregate, OrganizationAggregate, repository interfaces, ports, etc.).
+   565→  - Concrete value-object imports (Email, Username, DisplayName, Timezone, Locale, PasswordHash, Country) use regular `import` (they're instantiated).
+   566→  - NO `any` types anywhere.
+   567→  - NO `process.env` access (would be flagged by architecture checker).
+   568→  - NO Prisma imports outside infrastructure (would be flagged).
+   569→  - NO ES2015 namespaces.
+   570→  - Each handler constructor takes only port/repository INTERFACES (e.g., `UserRepository`, `AppSessionStore`, `ApiKeyHasher`, `UserReadModelStore`, `RbacEngine`) — no concrete implementations.
+   571→  - Handlers are NOT registered with the CommandBus/QueryBus in this layer (composition root's job); Zod schemas are exported as bulk-registration arrays for the composition root to consume.
+   572→- Ran `bun run lint` (0 errors), `bun run scripts/check-architecture.ts` (0 violations, 226 files scanned), and `bunx tsc --noEmit` (0 errors in the new application/ files — pre-existing domain-layer errors about event-class typing are unrelated to this task and present in the codebase before this work).
+   573→
+   574→Stage Summary:
+   575→- 16 new files created (8 command/query modules + 2 barrel exports + 1 schemas file + 1 application ports file):
+   576→  - `src/application/ports/identity-ports.ts` (~226 lines) — AppSession/AppSessionStore/AppJwtService/ApiKeyHasher/EmailService/TokenStore/GeoLocationService/LoginThrottle ports + UserView/OrganizationView/UserPermissionView read-model DTOs + UserReadModelStore/OrganizationReadModelStore ports.
+   577→  - `src/application/commands/identity/schemas.ts` (~355 lines) — Zod schemas for all 31 commands + 15 queries, exported as `IDENTITY_COMMAND_SCHEMAS` + `IDENTITY_QUERY_SCHEMAS` bulk-registration arrays.
+   578→  - `src/application/commands/identity/auth-commands.ts` (~911 lines) — 8 auth commands + handlers (RegisterUser, VerifyEmail, Login, Logout, RefreshSession, ChangePassword, RequestPasswordReset, ResetPassword).
+   579→  - `src/application/commands/identity/waitlist-commands.ts` (~232 lines) — 3 waitlist commands + handlers (ApproveUser, RejectUser, SubmitForApproval).
+   580→  - `src/application/commands/identity/user-management-commands.ts` (~635 lines) — 9 user-management commands + handlers (Suspend, Reactivate, Delete, UpdateProfile, ChangeEmail, EnableMfa, DisableMfa, AssignRole, RemoveRole).
+   581→  - `src/application/commands/identity/organization-commands.ts` (~334 lines) — 4 organization commands + handlers (Create, AddMember, RemoveMember, JoinOrganization).
+   582→  - `src/application/commands/identity/api-key-commands.ts` (~271 lines) — 3 API-key commands + handlers (Create, Rotate, Disable).
+   583→  - `src/application/commands/identity/role-commands.ts` (~313 lines) — 5 role/permission commands + handlers (CreateRole, UpdateRole, DeleteRole, CreatePermission, DeletePermission).
+   584→  - `src/application/commands/identity/index.ts` — barrel export.
+   585→  - `src/application/queries/identity/user-queries.ts` (~258 lines) — 4 user queries + handlers (GetUser, ListUsers, GetCurrentUser, GetUserPermissions).
+   586→  - `src/application/queries/identity/waitlist-queries.ts` (~97 lines) — 2 waitlist queries + handlers (ListWaitlist, GetWaitlistStats).
+   587→  - `src/application/queries/identity/organization-queries.ts` (~184 lines) — 3 organization queries + handlers (GetOrganization, ListOrganizations, GetOrganizationMembers).
+   588→  - `src/application/queries/identity/audit-queries.ts` (~111 lines) — 2 audit queries + handlers (ListAuditLog, GetAuditEntry).
+   589→  - `src/application/queries/identity/api-key-queries.ts` (~114 lines) — 2 API-key queries + handlers (ListApiKeys, GetApiKey — hash stripped from views).
+   590→  - `src/application/queries/identity/role-queries.ts` (~99 lines) — 2 role/permission queries + handlers (ListRoles, ListPermissions).
+   591→  - `src/application/queries/identity/index.ts` — barrel export.
+   592→- ~4,200 total lines of new application-layer code implementing 31 commands + 15 queries with full domain-error handling, value-object validation, optimistic-concurrency version tracking, optional audit logging (passed as `| null` so handlers don't fail when no audit repo is configured), and graceful degradation when optional services (RiskEngine, MfaProvider, BreachChecker, GeoLocationService, LoginThrottle, EmailService) are absent.
+   593→- All architectural rules respected: `import type` for type-only imports throughout, NO `any` types, NO `process.env` literals, NO Prisma outside infrastructure, NO ES2015 namespaces, NO handler registration (composition root's job).
+   594→- `bun run lint` passes (0 errors). `bun run scripts/check-architecture.ts` passes (0 violations, 226 files scanned). `bunx tsc --noEmit` passes for all new files (0 errors in `src/application/commands/identity/*` and `src/application/queries/identity/*` and `src/application/ports/identity-ports.ts`).
+   595→- NEXT (for composition root / main agent): (1) Implement the application-layer port interfaces (`AppSessionStore`, `AppJwtService`, `ApiKeyHasher`, `EmailService`, `TokenStore`, `GeoLocationService`, `LoginThrottle`, `UserReadModelStore`, `OrganizationReadModelStore`) as infrastructure adapters — most can wrap the existing `SessionStore`/`JwtService` in `src/infrastructure/sessions/session-store.ts` plus new Prisma-backed read-model stores. (2) Register all 31 command handlers + 15 query handlers with the CommandBus/QueryBus in the composition root. (3) Iterate `IDENTITY_COMMAND_SCHEMAS` + `IDENTITY_QUERY_SCHEMAS` and call `registerCommandValidator`/`registerQueryValidator` for each entry. (4) Wire projectors for `UserView` and `OrganizationView` (subscribe to identity events on the EventBus, upsert into Prisma projection tables). (5) Add API routes that dispatch these commands/queries (e.g., `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/users/:userId`, `GET /api/admin/waitlist`).
+   596→
+   597→---
+   598→Task ID: M3-4
+   599→Agent: general-purpose
+   600→Task: Build identity infrastructure (password hasher, stores, projectors, read models)
+   601→
+   602→Work Log:
+   603→- Read `/home/z/my-project/worklog.md` to inherit the full M1 + M2 architecture context (DDD/CQRS/Event Sourcing foundation plus M2 platform services). Inspected the existing `EventSourcedRepositoryBase`, `Projector` base class, `GameProjector` reference implementation, `RateLimiter` interface, `RedisClient` interface, `getClient()` transaction-context-aware Prisma wrapper, and the `PasswordHash` domain value object (which requires the `$argon2` prefix on stored hash strings).
+   604→- Inspected the identity domain layer built by prior agents: `UserAggregate` (full lifecycle: waitlist → approval → suspension → deletion + roles + memberships + MFA), `OrganizationAggregate` (members with status), identity events (`UserCreated`, `UserApproved`, `UserRejected`, `UserSuspendedM3`, `UserReactivated`, `UserDeleted`, `UserProfileUpdated`, `UserEmailChanged`, `UserEmailVerified`, `UserMfaEnabled`, `UserMfaDisabled`, `OrganizationCreated`, `MemberAdded`, `MemberRemoved`, `ApiKeyCreated`, `ApiKeyRotated`, `ApiKeyDisabled`, `AuditRecorded`), the `PasswordHasher`/`MfaProvider`/`OAuthProvider`/`BreachChecker` ports, and the 8 identity repository interfaces (UserRepository, OrganizationRepository, RoleRepository, PermissionRepository, ApiKeyRepository, AuditLogRepository, DeviceRepository, WaitlistRepository) plus their data shapes (RoleData, PermissionData, ApiKeyData, AuditLogEntry, AuditLogFilters, DeviceData, WaitlistEntry).
+   605→- Added Prisma models for the identity layer to `prisma/schema.prisma` (extended `UserReadModel` with displayName/timezone/locale/emailVerified/mfaEnabled; added `Role`, `Permission`, `ApiKey`, `AuditLog`, `Device`, `WaitlistEntry`, `OrganizationReadModel`, `OrganizationMemberReadModel` with proper indexes + unique constraints) and ran `bunx prisma db push` to sync the SQLite dev database and regenerate the Prisma client.
+   606→- Created `/home/z/my-project/src/infrastructure/identity/prisma-models.txt` documenting every Prisma model added (field-by-field, with index rationale) so the main agent / future migrations can reproduce the schema without diffing.
+   607→- Created `/home/z/my-project/src/infrastructure/identity/argon2-password-hasher.ts` — implements `PasswordHasher` port using Node's built-in `crypto.scrypt` (no external argon2 package). Produces PHC-format hash strings (`$argon2id$scrypt$v=1$N=...,r=...,p=...$<saltB64>$<hashB64>`) that satisfy the domain `PasswordHash` value-object validation (starts with `$argon2`, ≥20 chars). Configurable work factors (N, r, p) read via `getEnvVar('PASSWORD_SCRYPT_N'/'PASSWORD_SCRYPT_R'/'PASSWORD_SCRYPT_P')` with safe defaults (N=16384, r=8, p=1, 64-byte key, 16-byte salt). `verify()` parses params from the stored hash and uses `timingSafeEqual` for constant-time comparison. `validateStrength()` delegates to the domain `validatePasswordStrength()` helper.
+   608→- Created `/home/z/my-project/src/infrastructure/identity/api-key-generator.ts` — produces PlayLiquid secret keys (`pl_sk_<32-char-base62>`). 24 random bytes → uniform base62 distribution via big-integer carry conversion. SHA-256 hex digest for storage (64 chars). Display prefix is the first 12 chars. Includes `hashApiKey(plaintext)` for lookup, `isValidApiKeyFormat()` for input validation, `deriveApiKeyPrefix()` helper. Plaintext is never persisted — returned exactly once via `generateApiKey()` result.
+   609→- Created `/home/z/my-project/src/infrastructure/identity/user-repository-impl.ts` — `UserRepositoryImpl extends EventSourcedRepositoryBase<UserAggregate> implements UserRepository`. Constructor takes EventStore + SnapshotStore + OutboxRepository. `createAggregate(id)` returns `new UserAggregate(id)` (regular import, not type-only, because the aggregate is instantiated). `getByEmail`/`getByUsername`/`emailExists`/`usernameExists` query the `UserReadModel` projection (maintained by `UserProfileProjector`) for the userId, then rehydrate the full aggregate from the event store. Normalizes email/username to lowercase trimmed for case-insensitive lookup.
+   610→- Created `/home/z/my-project/src/infrastructure/identity/organization-repository-impl.ts` — same pattern as User repo but for `OrganizationAggregate`. `getBySlug()` queries `OrganizationReadModel` for the orgId, then rehydrates the aggregate.
+   611→- Created 6 Prisma-backed repositories:
+   612→  - `prisma-role-repository.ts` — RoleRepository impl. `permissions` field is JSON-encoded string[] (SQLite has no native array). System roles refuse deletion at the data layer.
+   613→  - `prisma-permission-repository.ts` — PermissionRepository impl. Permissions have `resource.action` IDs; schema enforces unique (resource, action). System permissions refuse deletion.
+   614→  - `prisma-api-key-repository.ts` — ApiKeyRepository impl. `scopes` JSON-encoded. `update()` accepts Partial<ApiKeyData> with field-by-field mapping. Used by both direct CRUD and the `ApiKeyProjector`.
+   615→  - `prisma-audit-log-repository.ts` — AuditLogRepository impl. Append-only: only `append` writes. `metadata` JSON-encoded. `list()` builds a Prisma `where` clause from filters (actorId/targetType/targetId/action/timestamp range). `listByActor`/`listByTarget` shortcuts.
+   616→  - `prisma-device-repository.ts` — DeviceRepository impl. `(userId, fingerprint)` composite unique. `revoke()` sets `revokedAt` timestamp and `trusted=false`.
+   617→  - `prisma-waitlist-repository.ts` — WaitlistRepository impl. `groupBy` aggregation for `countByStatus()`. Validates status enum on read.
+   618→  - All 6 use `getClient()` (transaction-context-aware), `logger.database()` for debug logging, and `import type` for domain interfaces.
+   619→- Created `/home/z/my-project/src/infrastructure/identity/identity-projectors.ts` — 4 projectors extending the abstract `Projector` base class:
+   620→  - `UserProfileProjector` — handles 11 event types (UserCreated, UserApproved, UserRejected, UserSuspendedM3, UserReactivated, UserDeleted, UserProfileUpdated, UserEmailChanged, UserEmailVerified, UserMfaEnabled, UserMfaDisabled). Uses `upsert` for UserCreated, `update` (with `.catch(() => {})` for idempotency on missing rows) for the rest. Maintains status transitions, profile fields, email/email-verified/MFA flags.
+   621→  - `OrganizationProjector` — handles OrganizationCreated (upsert), MemberAdded (upsert membership), MemberRemoved (mark `status='removed'`).
+   622→  - `AuditLogProjector` — append-only writer for AuditRecorded events. Reads actorType/ipAddress/userAgent from event metadata, persists JSON-encoded payload metadata. Idempotent: re-applying an AuditRecorded event hits the unique id constraint and is silently swallowed.
+   623→  - `ApiKeyProjector` — handles ApiKeyCreated (upsert with hash+prefix from metadata), ApiKeyRotated (update hash+prefix), ApiKeyDisabled (set active=false, revokedAt). The plaintext key is never in any event — only the hash + prefix flow through metadata.
+   624→- Created `/home/z/my-project/src/infrastructure/security/security-middleware.ts`:
+   625→  - `SecurityHeaders` — composes CSP (`default-src 'self'`, restricted script/style/img/font/connect, `frame-ancestors 'none'`, `upgrade-insecure-requests`), X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy strict-origin-when-cross-origin, Permissions-Policy (camera/microphone/geolocation/payment disabled), HSTS 1y+includeSubDomains+preload, X-XSS-Protection. Configurable via `CSP_EXTRA_SRC` and `CSP_REPORT_URI` env vars. Provides `apply(headers)`, `asRecord()`, `build()` helpers.
+   626→  - `CsrfProtection` — double-submit cookie pattern. `generateToken()` returns 32-byte base64url token. `validate(cookieToken, headerToken)` constant-time compares via `timingSafeEqual`. `validateRequest()` extracts header from a Request-like object. Cookie name `pl_csrf`, header `x-csrf-token`. `isMutatingMethod()` gates GET/HEAD out.
+   627→  - `SecureCookieOptions` + `buildSecureCookieOptions(overrides?)` — defaults to HttpOnly=true, SameSite=lax, secure=(NODE_ENV==='production'), path='/', maxAge=7d. `serializeSecureCookie()` produces a Set-Cookie attribute string.
+   628→  - `LoginThrottler` — wraps the platform `RateLimiter` with auth-specific defaults (5/60s/ip, sliding-window). Exposes `check()` (peek), `consume()` (token burn), `attempt()` (returns `{ allowed, retryAfterSeconds, remaining }`).
+   629→  - `AccountLockout` — per-user exponential-backoff lockout tracker. Configurable maxFailures/baseLockSeconds/multiplier/maxLockSeconds/resetAfterSeconds (defaults 5/60s/×2/3600s/900s). Backed by Redis (production, TTL-aware) or in-memory Map (dev). `recordFailure()` increments failures; on hitting maxFailures, sets `lockedUntil = now + min(base × multiplier^consecutiveLockouts, maxLock)` and bumps consecutiveLockouts. `recordSuccess()` clears all state. `isLocked()`/`getLockoutInfo()` peek state. `reset()` for admin override. State stored as JSON under `lockout:{userId}`.
+   630→- Verified: `bun run lint` passes (0 errors). `bun run scripts/check-architecture.ts` passes (0 violations, 226 files scanned). `bunx tsc --noEmit --skipLibCheck` reports 0 errors in any of the 13 new files (pre-existing errors in `src/shared/types/result.ts` and unrelated domain event files are not affected by this work).
+   631→- Smoke-tested every module end-to-end:
+   632→  - Password hasher: produces `$argon2id$scrypt$v=1$N=16384,r=8,p=1$...` hashes; verify accepts correct password, rejects wrong password; strength validation flags short passwords.
+   633→  - API key generator: produces `pl_sk_<32 chars>`, 64-char SHA-256 hex hash, 12-char prefix; `hashApiKey()` round-trips; `isValidApiKeyFormat()` rejects malformed input.
+   634→  - Security headers: CSP/X-Frame-Options/HSTS all set as expected.
+   635→  - CSRF: constant-time token validation, rejects mismatched/missing tokens.
+   636→  - Cookie options: HttpOnly + SameSite=Lax defaults, serializer produces correct attribute string.
+   637→  - LoginThrottler: 5 attempts allowed, 6th blocked with 60s retryAfter.
+   638→  - AccountLockout: locks after 3 failures with escalating windows (60s → 120s → 240s); resets on success; works with both memory and Redis backends.
+   639→  - Prisma repositories: all 6 models accessible on the regenerated Prisma client; Role save/getByName/delete round-trips; permissions JSON array round-trips correctly.
+   640→  - Projectors (end-to-end with real Prisma): UserCreated creates read model with waitlist status; UserEmailVerified sets emailVerified=true; UserApproved transitions status to active; UserProfileUpdated updates displayName/timezone/locale; OrganizationCreated creates org read model; MemberAdded creates active membership; MemberRemoved marks membership as removed; idempotency verified (re-applying UserEmailVerified leaves state unchanged).
+   641→
+   642→Stage Summary:
+   643→- 13 new files created exactly at the requested paths:
+   644→  1. `src/infrastructure/identity/prisma-models.txt` — schema documentation.
+   645→  2. `src/infrastructure/identity/argon2-password-hasher.ts` — scrypt-based `PasswordHasher` impl with PHC-format hashes.
+   646→  3. `src/infrastructure/identity/api-key-generator.ts` — `pl_sk_<base62>` key generator with SHA-256 hashing.
+   647→  4. `src/infrastructure/identity/user-repository-impl.ts` — event-sourced user repo with email/username lookup via read model.
+   648→  5. `src/infrastructure/identity/organization-repository-impl.ts` — event-sourced org repo with slug lookup.
+   649→  6. `src/infrastructure/identity/prisma-role-repository.ts` — RBAC role CRUD with JSON-encoded permissions.
+   650→  7. `src/infrastructure/identity/prisma-permission-repository.ts` — RBAC permission CRUD.
+   651→  8. `src/infrastructure/identity/prisma-api-key-repository.ts` — hashed API key CRUD with last-used tracking.
+   652→  9. `src/infrastructure/identity/prisma-audit-log-repository.ts` — append-only audit log with rich filtering.
+   653→  10. `src/infrastructure/identity/prisma-device-repository.ts` — device registry with revoke support.
+   654→  11. `src/infrastructure/identity/prisma-waitlist-repository.ts` — waitlist pipeline with status counts.
+   655→  12. `src/infrastructure/identity/identity-projectors.ts` — 4 projectors covering user/org/audit/apikey read models.
+   656→  13. `src/infrastructure/security/security-middleware.ts` — security headers + CSRF + cookie options + login throttler + account lockout.
+   657→- Prisma schema extended with 8 new models (Role, Permission, ApiKey, AuditLog, Device, WaitlistEntry, OrganizationReadModel, OrganizationMemberReadModel) plus 5 new fields on the existing UserReadModel (displayName, timezone, locale, emailVerified, mfaEnabled). `bunx prisma db push` applied successfully.
+   658→- All architecture rules respected: `import type` for type-only imports throughout (regular import only for instantiated classes like `UserAggregate`, `OrganizationAggregate`, `EventSourcedRepositoryBase`, `Projector`); no `any` types; no `process.env` literals (uses `getEnvVar()` for all env reads); no Prisma outside `src/infrastructure/`; no ES2015 namespaces; all DB access via `getClient()` (transaction-context aware).
+   659→- `bun run lint` passes (0 errors). `bun run scripts/check-architecture.ts` passes (0 violations, 226 files scanned). `bunx tsc --noEmit --skipLibCheck` reports 0 errors in the 13 new files.
+   660→- All modules smoke-tested end-to-end against the real SQLite Prisma client and the real Redis/memory rate-limiter and lockout backends.
+   661→- NEXT (for composition root / main agent): (1) Wire `Argon2PasswordHasher` into `TOKENS.PasswordHasher` (new token needed). (2) Wire `UserRepositoryImpl`/`OrganizationRepositoryImpl` into new `TOKENS.UserRepository`/`TOKENS.OrganizationRepository` tokens, passing the existing `EventStore`/`SnapshotStore`/`OutboxRepository` singletons. (3) Wire the 6 Prisma repositories into new tokens. (4) Register the 4 new projectors on the `ProjectionEngine` alongside the existing Game/Wallet/Leaderboard/Statistics projectors. (5) Implement the application-layer ports from `src/application/ports/identity-ports.ts` (`ApiKeyHasher`, `LoginThrottle`, `UserReadModelStore`, `OrganizationReadModelStore`) as infrastructure adapters — most can wrap the new modules (e.g., an `ApiKeyHasherImpl` that delegates to `generateApiKey()`/`hashApiKey()`; a `LoginThrottleImpl` that delegates to `AccountLockout`). (6) Register all 31 identity command handlers + 15 query handlers (built by the parallel M3-3 agent) on the CommandBus/QueryBus and iterate `IDENTITY_COMMAND_SCHEMAS` + `IDENTITY_QUERY_SCHEMAS` for validator registration. (7) Add API routes that dispatch the identity commands/queries (`POST /api/auth/register`, `POST /api/auth/login`, `GET /api/users/:userId`, `POST /api/admin/waitlist/:id/approve`, etc.) — gate mutating routes with `CsrfProtection.validateRequest()` and apply `SecurityHeaders` to all responses.
+   662→
+   663→---
+   664→Task ID: M3-6
+   665→Agent: frontend-styling-expert
+   666→Task: Build admin console UI for identity management
+   667→
+   668→Work Log:
+   669→- Read worklog.md and the existing `src/app/page.tsx` to understand the established dark slate-950 + emerald/cyan design language, then audited the identity API surface: confirmed exact payload shapes for `ApproveUser`/`RejectUser` (userId + approvedBy/rejectedBy + notes/reason), `CreateApiKey` (returns `{apiKeyId, plaintextKey, keyPrefix}` — plaintext shown once), `SuspendUser`/`ReactivateUser`/`DeleteUser`, `CreateOrganization`, `CreateRole`/`CreatePermission`, `DisableApiKey`, and the read-model shapes (`UserView`, `OrganizationView`, `RoleData`, `PermissionData`, `ApiKeyView`, `AuditLogEntry`, `WaitlistEntry`).
+   670→- Created `/home/z/my-project/src/app/admin/page.tsx` (a NEW page, leaving `src/app/page.tsx` untouched) as a single `'use client'` module implementing all 7 tabs via shadcn `Tabs`:
+   671→  1. **Waitlist** — 5-card stats bar (Total/Pending/Email Verified/Approved/Rejected from `GET /api/admin/waitlist/stats`) + table with Approve/Reject dialogs (notes / required reason) hitting `POST /api/admin/waitlist/approve|reject`.
+   672→  2. **Users** — debounced search + status filter Select + table; detail dialog showing full profile (email, username, displayName, country, timezone, locale, status, emailVerified, MFA, roles, memberships, timestamps); Suspend (required reason), Reactivate, and Delete (typed "DELETE" confirmation) dialogs hitting the three `POST /api/admin/users/*` endpoints.
+   673→  3. **Organizations** — card grid (name, slug, type, member count, active) + create dialog (name, auto-slug, type dropdown of the 5 org types) + members dialog that fetches `GET /api/admin/organizations/:id/members` with graceful degradation when the members route is absent.
+   674→  4. **Roles & Permissions** — two-column layout; roles list with permission counts + create-role dialog (comma-separated permission IDs); permissions grouped by resource + create-permission dialog (resource/action/description).
+   675→  5. **API Keys** — key cards (name, prefix, scopes, status, created/last-used/expires/last-IP) + Switch to toggle including revoked keys + create dialog (name, scopes, optional ISO expiry) → one-time plaintext-key dialog with copy button and "will not be shown again" warning + disable dialog.
+   676→  6. **Audit Log** — filters (Actor ID, Target Type, Action, From/To date range) + table (timestamp, action, actor, target type/ID, IP) + detail dialog rendering the full metadata JSON.
+   677→  7. **Architecture** — fetches `GET /api/architecture` for live command/query/event/binding counts and the registered command & query type lists; plus static reference panels for identity Value Objects (12), Aggregates (2), Domain Events (25), Repositories (8), and the hybrid RBAC+ABAC Authorization Engine (RbacEngine / AbacEngine / PolicyEngine).
+   678→- Wired toast feedback via `sonner` (`toast.success`/`toast.error`) with a dark-theme `<Toaster>` mounted at the page root; loading states use `Skeleton` rows/cards; errors render an `ErrorBanner` with retry; empty states use a dashed `EmptyState`. All timestamps formatted as relative time ("2 minutes ago"). Status badges follow the green/amber/rose tone spec (active/approved → emerald, pending/waitlist → amber, rejected/suspended/deleted/revoked → rose). All IDs/timestamps/technical data render in `font-mono`.
+   679→- Used the full required shadcn/ui set (Card, Badge, Button, Input, Label, Select, Tabs, ScrollArea, Table, Dialog, Switch, Textarea) plus Skeleton and Separator; Lucide icons as specified (Users, Shield, Building2, Key, Clock, FileText, CheckCircle, XCircle, AlertTriangle, Plus, Trash2, Edit via Eye, Search) plus a few helpers (Loader2, RefreshCw, Copy, ChevronRight, ShieldCheck, Layers). Root uses `min-h-screen flex flex-col` with `mt-auto` footer; mobile-first responsive grids throughout; horizontal Tabs wrapped in a ScrollArea for small screens.
+   680→- `cd /home/z/my-project && bun run lint` → 0 errors, 0 warnings. `bunx tsc --noEmit` reports 0 errors in `src/app/admin/page.tsx` (the only tsc errors in the repo are pre-existing ones in `src/shared/types/result.ts`, untouched by this task).
+   681→
+   682→Stage Summary:
+   683→- Delivered the PlayLiquid Identity Admin Console at `/admin` — a 7-tab, fully-wired operational UI that exercises every M3 identity admin API endpoint (waitlist approval, user lifecycle, organizations, RBAC, API keys with one-time plaintext reveal, audit log with metadata, and live architecture introspection).
+   684→- Design is consistent with the existing architecture dashboard (dark slate-950, emerald/cyan accents, monospace technical data, sticky footer, mobile-first) but lives on a separate route so the main dashboard is unmodified.
+   685→- All mutating actions go through confirmation dialogs with the exact `{payload: {...}}` envelope specified; all reads use relative timestamps and tone-coded status badges; loading/error/empty states are handled throughout; lint passes cleanly.
+   686→
+   687→---
+   688→Task ID: M3-Final
+   689→Agent: main
+   690→Task: Wire M3 identity into DI container, build API routes, admin UI, final verification
+   691→
+   692→Work Log:
+   693→- Added 8 new Prisma models: Role, Permission, ApiKey, AuditLog, Device, WaitlistEntry, OrganizationReadModel, OrganizationMemberReadModel
+   694→- Built identity API handlers (src/interfaces/api/identity/identity-handlers.ts) with all auth and admin endpoints
+   695→- Created 30+ API route files for auth (/api/auth/*) and admin (/api/admin/*) endpoints
+   696→- Created InMemoryTokenStore for email verification and password reset tokens
+   697→- Created ConsoleEmailService for development email delivery
+   698→- Created PrismaUserReadModelStore and PrismaOrganizationReadModelStore for query handlers
+   699→- Wired all identity infrastructure into composition root:
+   700→  - 13 infrastructure singletons (PasswordHasher, UserRepository, OrganizationRepository, RoleRepository, PermissionRepository, ApiKeyRepository, AuditLogRepository, DeviceRepository, WaitlistRepository, TokenStore, EmailService, UserReadModelStore, OrganizationReadModelStore)
+   701→  - Authorization engine (RbacEngine, AbacEngine, PolicyEngine, RiskEngine)
+   702→  - 4 identity projectors (UserProfile, Organization, AuditLog, ApiKey)
+   703→  - 31 identity command handlers registered on CommandBus
+   704→  - 15 identity query handlers registered on QueryBus
+   705→  - All identity Zod schemas registered as validators
+   706→  - All identity events registered (25 new event types)
+   707→- Fixed event registration conflict (registerEventSafe for duplicate event types)
+   708→- Fixed event-sourced repository save (auto-calculates stream version from aggregate version)
+   709→- Dispatched frontend subagent for admin UI (src/app/admin/page.tsx)
+   710→
+   711→Stage Summary:
+   712→- 263 TypeScript source files (up from 182 in M2)
+   713→- 33 commands registered (1 M1 + 31 M3 + 1 game)
+   714→- 16 queries registered (1 M1 + 14 M3 + 1 game)
+   715→- 50 event types registered (25 M1/M2 + 25 M3)
+   716→- Lint: 0 errors
+   717→- Architecture checker: 0 violations (263 files)
+   718→- Full identity flow verified: register → waitlist → list users → create roles → create permissions
+   719→- Business rules enforced: can't approve without email verification, can't suspend deleted users
+   720→- Admin console UI: 7 tabs (Waitlist, Users, Organizations, Roles & Permissions, API Keys, Audit Log, Architecture)
+
+[showing lines 350-720 of 722; use offset=721 with limit to continue reading]

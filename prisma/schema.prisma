@@ -291,7 +291,7 @@ model FeatureFlagRecord {
 // ─── M3: Identity — RBAC, API Keys, Audit Log, Devices, Waitlist ───────────
 
 model Role {
-  id          String   @id
+  id          String   @id @default(cuid())
   name        String   @unique
   description String   @default("")
   permissions String   @default("[]")
@@ -303,7 +303,7 @@ model Role {
 }
 
 model Permission {
-  id          String   @id
+  id          String   @id @default(cuid())
   resource    String
   action      String
   description String   @default("")
@@ -334,7 +334,7 @@ model ApiKey {
 }
 
 model AuditLog {
-  id            String   @id
+  id            String   @id @default(cuid())
   action        String
   actorId       String
   actorType     String
@@ -355,7 +355,7 @@ model AuditLog {
 }
 
 model Device {
-  id            String   @id
+  id            String   @id @default(cuid())
   userId        String
   name          String
   browser       String   @default("")
@@ -419,5 +419,156 @@ model OrganizationMemberReadModel {
   @@unique([orgId, userId])
   @@index([orgId])
   @@index([userId])
+}
+
+// ─── Launch & Scale Program — Beta Cohorts, Feedback, Validation, etc. ──────
+
+model BetaCohort {
+  id              String   @id @default(cuid())
+  cohortId        String   @unique
+  name            String
+  phase           String   @default("closed_beta")
+  maxParticipants Int      @default(50)
+  createdById     String
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([phase])
+  @@index([active])
+  @@index([createdById])
+}
+
+model CohortParticipant {
+  id            String   @id @default(cuid())
+  cohortId      String
+  invitationId  String   @unique
+  userId        String
+  email         String
+  role          String   @default("player")
+  status        String   @default("pending")
+  invitedAt     String
+  acceptedAt    String?
+  expiresAt     String
+  createdAt     DateTime @default(now())
+
+  @@index([cohortId])
+  @@index([userId])
+  @@index([status])
+  @@index([email])
+}
+
+model FeedbackRecord {
+  id           String   @id @default(cuid())
+  cohortId     String
+  userId       String
+  category     String
+  severity     String
+  title        String
+  description  String
+  status       String   @default("new")
+  assignedTo   String?
+  triagedBy    String?
+  triagedAt    String?
+  triageNotes  String?
+  createdAt    String
+  updatedAt    String
+
+  @@index([cohortId])
+  @@index([userId])
+  @@index([status])
+  @@index([severity])
+  @@index([category])
+  @@index([createdAt])
+}
+
+model ValidationRun {
+  id            String   @id @default(cuid())
+  suite         String
+  status        String   @default("running")
+  totalChecks   Int      @default(0)
+  passedChecks  Int      @default(0)
+  failedChecks  Int      @default(0)
+  durationMs    Int      @default(0)
+  triggeredBy   String
+  startedAt     String
+  completedAt   String?
+  report        String   @default("{}")
+
+  @@index([suite])
+  @@index([status])
+  @@index([startedAt])
+}
+
+model ReconciliationReport {
+  id                    String   @id @default(cuid())
+  period                String
+  status                String
+  expectedBalance       Int      @default(0)
+  actualBalance         Int      @default(0)
+  discrepancy           Int      @default(0)
+  totalTransactions     Int      @default(0)
+  matchedTransactions   Int      @default(0)
+  unmatchedTransactions Int      @default(0)
+  completedAt           String
+  details               String   @default("{}")
+
+  @@index([period])
+  @@index([status])
+  @@index([completedAt])
+}
+
+model SessionReplay {
+  id              String   @id @default(cuid())
+  sessionId       String
+  userId          String
+  cohortId        String
+  durationSeconds Int      @default(0)
+  eventCount      Int      @default(0)
+  recordedAt      String
+  storageKey      String
+  metadata        String   @default("{}")
+
+  @@index([cohortId])
+  @@index([userId])
+  @@index([recordedAt])
+}
+
+model BugReport {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  severity    String
+  category    String
+  status      String   @default("open")
+  reportedBy  String
+  cohortId    String
+  assignedTo  String?
+  resolvedBy  String?
+  resolvedAt  String?
+  resolution  String?
+  createdAt   String
+  updatedAt   String
+
+  @@index([severity])
+  @@index([status])
+  @@index([cohortId])
+  @@index([assignedTo])
+  @@index([createdAt])
+}
+
+model PerformanceMetric {
+  id        String   @id @default(cuid())
+  metric    String
+  value     Float
+  unit      String
+  threshold Float?
+  status    String   @default("ok")
+  timestamp String
+  metadata  String   @default("{}")
+
+  @@index([metric, timestamp])
+  @@index([status])
+  @@index([timestamp])
 }
 
