@@ -1,0 +1,200 @@
+  - Prisma repositories: all 6 models accessible on the regenerated Prisma client; Role save/getByName/delete round-trips; permissions JSON array round-trips correctly.
+  - Projectors (end-to-end with real Prisma): UserCreated creates read model with waitlist status; UserEmailVerified sets emailVerified=true; UserApproved transitions status to active; UserProfileUpdated updates displayName/timezone/locale; OrganizationCreated creates org read model; MemberAdded creates active membership; MemberRemoved marks membership as removed; idempotency verified (re-applying UserEmailVerified leaves state unchanged).
+
+Stage Summary:
+- 13 new files created exactly at the requested paths:
+  1. `src/infrastructure/identity/prisma-models.txt` — schema documentation.
+  2. `src/infrastructure/identity/argon2-password-hasher.ts` — scrypt-based `PasswordHasher` impl with PHC-format hashes.
+  3. `src/infrastructure/identity/api-key-generator.ts` — `pl_sk_<base62>` key generator with SHA-256 hashing.
+  4. `src/infrastructure/identity/user-repository-impl.ts` — event-sourced user repo with email/username lookup via read model.
+  5. `src/infrastructure/identity/organization-repository-impl.ts` — event-sourced org repo with slug lookup.
+  6. `src/infrastructure/identity/prisma-role-repository.ts` — RBAC role CRUD with JSON-encoded permissions.
+  7. `src/infrastructure/identity/prisma-permission-repository.ts` — RBAC permission CRUD.
+  8. `src/infrastructure/identity/prisma-api-key-repository.ts` — hashed API key CRUD with last-used tracking.
+  9. `src/infrastructure/identity/prisma-audit-log-repository.ts` — append-only audit log with rich filtering.
+  10. `src/infrastructure/identity/prisma-device-repository.ts` — device registry with revoke support.
+  11. `src/infrastructure/identity/prisma-waitlist-repository.ts` — waitlist pipeline with status counts.
+  12. `src/infrastructure/identity/identity-projectors.ts` — 4 projectors covering user/org/audit/apikey read models.
+  13. `src/infrastructure/security/security-middleware.ts` — security headers + CSRF + cookie options + login throttler + account lockout.
+- Prisma schema extended with 8 new models (Role, Permission, ApiKey, AuditLog, Device, WaitlistEntry, OrganizationReadModel, OrganizationMemberReadModel) plus 5 new fields on the existing UserReadModel (displayName, timezone, locale, emailVerified, mfaEnabled). `bunx prisma db push` applied successfully.
+- All architecture rules respected: `import type` for type-only imports throughout (regular import only for instantiated classes like `UserAggregate`, `OrganizationAggregate`, `EventSourcedRepositoryBase`, `Projector`); no `any` types; no `process.env` literals (uses `getEnvVar()` for all env reads); no Prisma outside `src/infrastructure/`; no ES2015 namespaces; all DB access via `getClient()` (transaction-context aware).
+- `bun run lint` passes (0 errors). `bun run scripts/check-architecture.ts` passes (0 violations, 226 files scanned). `bunx tsc --noEmit --skipLibCheck` reports 0 errors in the 13 new files.
+- All modules smoke-tested end-to-end against the real SQLite Prisma client and the real Redis/memory rate-limiter and lockout backends.
+- NEXT (for composition root / main agent): (1) Wire `Argon2PasswordHasher` into `TOKENS.PasswordHasher` (new token needed). (2) Wire `UserRepositoryImpl`/`OrganizationRepositoryImpl` into new `TOKENS.UserRepository`/`TOKENS.OrganizationRepository` tokens, passing the existing `EventStore`/`SnapshotStore`/`OutboxRepository` singletons. (3) Wire the 6 Prisma repositories into new tokens. (4) Register the 4 new projectors on the `ProjectionEngine` alongside the existing Game/Wallet/Leaderboard/Statistics projectors. (5) Implement the application-layer ports from `src/application/ports/identity-ports.ts` (`ApiKeyHasher`, `LoginThrottle`, `UserReadModelStore`, `OrganizationReadModelStore`) as infrastructure adapters — most can wrap the new modules (e.g., an `ApiKeyHasherImpl` that delegates to `generateApiKey()`/`hashApiKey()`; a `LoginThrottleImpl` that delegates to `AccountLockout`). (6) Register all 31 identity command handlers + 15 query handlers (built by the parallel M3-3 agent) on the CommandBus/QueryBus and iterate `IDENTITY_COMMAND_SCHEMAS` + `IDENTITY_QUERY_SCHEMAS` for validator registration. (7) Add API routes that dispatch the identity commands/queries (`POST /api/auth/register`, `POST /api/auth/login`, `GET /api/users/:userId`, `POST /api/admin/waitlist/:id/approve`, etc.) — gate mutating routes with `CsrfProtection.validateRequest()` and apply `SecurityHeaders` to all responses.
+
+---
+Task ID: M3-6
+Agent: frontend-styling-expert
+Task: Build admin console UI for identity management
+
+Work Log:
+- Read worklog.md and the existing `src/app/page.tsx` to understand the established dark slate-950 + emerald/cyan design language, then audited the identity API surface: confirmed exact payload shapes for `ApproveUser`/`RejectUser` (userId + approvedBy/rejectedBy + notes/reason), `CreateApiKey` (returns `{apiKeyId, plaintextKey, keyPrefix}` — plaintext shown once), `SuspendUser`/`ReactivateUser`/`DeleteUser`, `CreateOrganization`, `CreateRole`/`CreatePermission`, `DisableApiKey`, and the read-model shapes (`UserView`, `OrganizationView`, `RoleData`, `PermissionData`, `ApiKeyView`, `AuditLogEntry`, `WaitlistEntry`).
+- Created `/home/z/my-project/src/app/admin/page.tsx` (a NEW page, leaving `src/app/page.tsx` untouched) as a single `'use client'` module implementing all 7 tabs via shadcn `Tabs`:
+  1. **Waitlist** — 5-card stats bar (Total/Pending/Email Verified/Approved/Rejected from `GET /api/admin/waitlist/stats`) + table with Approve/Reject dialogs (notes / required reason) hitting `POST /api/admin/waitlist/approve|reject`.
+  2. **Users** — debounced search + status filter Select + table; detail dialog showing full profile (email, username, displayName, country, timezone, locale, status, emailVerified, MFA, roles, memberships, timestamps); Suspend (required reason), Reactivate, and Delete (typed "DELETE" confirmation) dialogs hitting the three `POST /api/admin/users/*` endpoints.
+  3. **Organizations** — card grid (name, slug, type, member count, active) + create dialog (name, auto-slug, type dropdown of the 5 org types) + members dialog that fetches `GET /api/admin/organizations/:id/members` with graceful degradation when the members route is absent.
+  4. **Roles & Permissions** — two-column layout; roles list with permission counts + create-role dialog (comma-separated permission IDs); permissions grouped by resource + create-permission dialog (resource/action/description).
+  5. **API Keys** — key cards (name, prefix, scopes, status, created/last-used/expires/last-IP) + Switch to toggle including revoked keys + create dialog (name, scopes, optional ISO expiry) → one-time plaintext-key dialog with copy button and "will not be shown again" warning + disable dialog.
+  6. **Audit Log** — filters (Actor ID, Target Type, Action, From/To date range) + table (timestamp, action, actor, target type/ID, IP) + detail dialog rendering the full metadata JSON.
+  7. **Architecture** — fetches `GET /api/architecture` for live command/query/event/binding counts and the registered command & query type lists; plus static reference panels for identity Value Objects (12), Aggregates (2), Domain Events (25), Repositories (8), and the hybrid RBAC+ABAC Authorization Engine (RbacEngine / AbacEngine / PolicyEngine).
+- Wired toast feedback via `sonner` (`toast.success`/`toast.error`) with a dark-theme `<Toaster>` mounted at the page root; loading states use `Skeleton` rows/cards; errors render an `ErrorBanner` with retry; empty states use a dashed `EmptyState`. All timestamps formatted as relative time ("2 minutes ago"). Status badges follow the green/amber/rose tone spec (active/approved → emerald, pending/waitlist → amber, rejected/suspended/deleted/revoked → rose). All IDs/timestamps/technical data render in `font-mono`.
+- Used the full required shadcn/ui set (Card, Badge, Button, Input, Label, Select, Tabs, ScrollArea, Table, Dialog, Switch, Textarea) plus Skeleton and Separator; Lucide icons as specified (Users, Shield, Building2, Key, Clock, FileText, CheckCircle, XCircle, AlertTriangle, Plus, Trash2, Edit via Eye, Search) plus a few helpers (Loader2, RefreshCw, Copy, ChevronRight, ShieldCheck, Layers). Root uses `min-h-screen flex flex-col` with `mt-auto` footer; mobile-first responsive grids throughout; horizontal Tabs wrapped in a ScrollArea for small screens.
+- `cd /home/z/my-project && bun run lint` → 0 errors, 0 warnings. `bunx tsc --noEmit` reports 0 errors in `src/app/admin/page.tsx` (the only tsc errors in the repo are pre-existing ones in `src/shared/types/result.ts`, untouched by this task).
+
+Stage Summary:
+- Delivered the PlayLiquid Identity Admin Console at `/admin` — a 7-tab, fully-wired operational UI that exercises every M3 identity admin API endpoint (waitlist approval, user lifecycle, organizations, RBAC, API keys with one-time plaintext reveal, audit log with metadata, and live architecture introspection).
+- Design is consistent with the existing architecture dashboard (dark slate-950, emerald/cyan accents, monospace technical data, sticky footer, mobile-first) but lives on a separate route so the main dashboard is unmodified.
+- All mutating actions go through confirmation dialogs with the exact `{payload: {...}}` envelope specified; all reads use relative timestamps and tone-coded status badges; loading/error/empty states are handled throughout; lint passes cleanly.
+
+---
+Task ID: M3-Final
+Agent: main
+Task: Wire M3 identity into DI container, build API routes, admin UI, final verification
+
+Work Log:
+- Added 8 new Prisma models: Role, Permission, ApiKey, AuditLog, Device, WaitlistEntry, OrganizationReadModel, OrganizationMemberReadModel
+- Built identity API handlers (src/interfaces/api/identity/identity-handlers.ts) with all auth and admin endpoints
+- Created 30+ API route files for auth (/api/auth/*) and admin (/api/admin/*) endpoints
+- Created InMemoryTokenStore for email verification and password reset tokens
+- Created ConsoleEmailService for development email delivery
+- Created PrismaUserReadModelStore and PrismaOrganizationReadModelStore for query handlers
+- Wired all identity infrastructure into composition root:
+  - 13 infrastructure singletons (PasswordHasher, UserRepository, OrganizationRepository, RoleRepository, PermissionRepository, ApiKeyRepository, AuditLogRepository, DeviceRepository, WaitlistRepository, TokenStore, EmailService, UserReadModelStore, OrganizationReadModelStore)
+  - Authorization engine (RbacEngine, AbacEngine, PolicyEngine, RiskEngine)
+  - 4 identity projectors (UserProfile, Organization, AuditLog, ApiKey)
+  - 31 identity command handlers registered on CommandBus
+  - 15 identity query handlers registered on QueryBus
+  - All identity Zod schemas registered as validators
+  - All identity events registered (25 new event types)
+- Fixed event registration conflict (registerEventSafe for duplicate event types)
+- Fixed event-sourced repository save (auto-calculates stream version from aggregate version)
+- Dispatched frontend subagent for admin UI (src/app/admin/page.tsx)
+
+Stage Summary:
+- 263 TypeScript source files (up from 182 in M2)
+- 33 commands registered (1 M1 + 31 M3 + 1 game)
+- 16 queries registered (1 M1 + 14 M3 + 1 game)
+- 50 event types registered (25 M1/M2 + 25 M3)
+- Lint: 0 errors
+- Architecture checker: 0 violations (263 files)
+- Full identity flow verified: register → waitlist → list users → create roles → create permissions
+- Business rules enforced: can't approve without email verification, can't suspend deleted users
+- Admin console UI: 7 tabs (Waitlist, Users, Organizations, Roles & Permissions, API Keys, Audit Log, Architecture)
+- All endpoints return 200
+
+---
+Task ID: LAUNCH-2
+Agent: general-purpose
+Task: Build launch application commands and queries
+
+Work Log:
+- Read worklog.md and existing M1 identity command/query files to learn the established CQRS pattern (CommandWithPayload<TPayload>, QueryWithPayload<TPayload, TResult>, CommandHandler/QueryHandler interfaces, Result.fail/ok, repository interface injection, optional fallback repo parameter).
+- Inspected the launch domain layer: BetaCohortAggregate (event-sourced, has create/invite/acceptInvitation/revokeInvitation), the 7 launch repository interfaces (BetaCohort, Feedback, ValidationRun, Reconciliation, SessionReplay, Bug, PerformanceMetric), ReconciliationService, ValidationSuiteRunner.
+- Created src/application/ports/launch-ports.ts defining application-layer port interfaces: PaginatedResult<T>, BetaCohortView, BetaCohortListFilters, BetaCohortReadModelStore (for ListCohorts/GetCohort queries), InvitationLookup (resolves cohort id from invitation id for Accept/Revoke commands), ParticipantView, and a participantToView helper. Mirrors the identity-ports.ts pattern.
+- Created src/application/commands/launch/schemas.ts with 14 Zod command schemas + 16 query schemas, exported as LAUNCH_COMMAND_SCHEMAS and LAUNCH_QUERY_SCHEMAS arrays.
+- Created 7 command files (14 commands total): beta-commands.ts (CreateCohort, InviteParticipant, AcceptInvitation, RevokeInvitation), feedback-commands.ts (SubmitFeedback, TriageFeedback), validation-commands.ts (StartValidationRun, CompleteValidationRun), reconciliation-commands.ts (RunReconciliation), bug-commands.ts (ReportBug, ResolveBug, AssignBug), performance-commands.ts (RecordMetric), session-replay-commands.ts (RecordSession).
+- Created 7 query files (16 queries total): beta-queries.ts (GetCohort, ListCohorts, GetCohortParticipants), feedback-queries.ts (ListFeedback, GetFeedbackStats), validation-queries.ts (GetValidationRun, ListValidationRuns, GetLatestValidation), reconciliation-queries.ts (GetReconciliation, ListReconciliations, GetLatestReconciliation), bug-queries.ts (ListBugs, GetBugStats), performance-queries.ts (GetPerformanceSummary, ListMetrics), session-replay-queries.ts (ListSessionReplays).
+- Created index.ts barrel exports for both commands/launch/ and queries/launch/.
+- All handlers use `import type` for type-only imports, value imports for class constructors (e.g., BetaCohortAggregate.create()), and inject repository/service INTERFACES (never concrete implementations). Command handlers accept OptionalNullError-fallback parameters where appropriate (e.g., BetaCohortRepository | null for GetCohort).
+- Ran `bun run lint` — initially 2 errors (empty interfaces for empty-payload queries). Fixed by converting to `Record<string, never>` type aliases (matching the identity GetWaitlistStatsPayload pattern). Lint now passes clean.
+- Ran `bun run scripts/check-architecture.ts` — passes clean (no APP_NO_INFRA, no NO_ANY, no NO_RAW_ENV violations across all 295 scanned files).
+- Ran `bunx tsc --noEmit` to verify type correctness in new files — no errors in any of the 18 new files (pre-existing unrelated errors elsewhere).
+
+Stage Summary:
+- 18 new files in src/application/{commands,queries}/launch/ and src/application/ports/launch-ports.ts implementing the complete launch application layer.
+- 14 launch commands + 16 launch queries ready for composition-root registration (handlers NOT auto-registered per the task spec).
+- All launch domain repositories, the ReconciliationService, and ValidationSuiteRunner are wired into the application layer via constructor-injected interfaces.
+- Architecture boundaries verified: no Prisma imports, no process.env access, no infrastructure leaks, no `any` types, no ES2015 namespaces.
+- Pattern parity with identity layer established for the launch domain, enabling the composition root to bind concrete adapters and the API routes to dispatch commands/queries via the existing buses.
+
+---
+Task ID: LAUNCH-3
+Agent: general-purpose
+Task: Build launch infrastructure (reconciliation source, feedback store, validation suites, session replay, bug repo, performance metrics)
+
+Work Log:
+- Read `/home/z/my-project/worklog.md` to inherit the full M1+M2+M3 architecture context (DDD/CQRS/Event Sourcing foundation plus M2 platform services plus M3 identity layer). Inspected the launch domain layer built by prior agents: `BetaCohortAggregate` (event-sourced, raises `BetaCohortCreated`/`ParticipantInvited`/`InvitationAccepted`/`InvitationRevoked`), the 7 repository interfaces in `src/domain/launch/repositories/index.ts`, the `ReconciliationSource` + `ReconciliationService` ports, and the `ValidationCheck`/`ValidationSuite`/`ValidationSuiteRunner` framework in `src/domain/launch/services/validation-suite.ts`.
+- Inspected the existing event-sourced repository pattern (`EventSourcedRepositoryBase<TAggregate>`, the `UserRepositoryImpl` / `OrganizationRepositoryImpl` reference implementations, the `streamId()` helper from `@/shared/ids`, and the `EventStore` port from `@/application/ports`). Confirmed the stream ID convention is `${aggregateType.toLowerCase()}-${aggregateId}` so wallet streams look like `walletaggregate-<playerId>` and beta cohort streams look like `betacohortaggregate-<cohortId>`.
+- Inspected the existing Prisma repository pattern (`getClient()` transaction-context aware, JSON-encoded metadata columns for SQLite, `groupBy` aggregations for `countByStatus`-style methods, `upsert` for idempotent saves, `import type` for domain interfaces + regular import only for instantiated classes). Reviewed the existing `WalletProjector` (which maintains the `WalletReadModel` from `WalletDeposited`/`WalletWithdrawn`/`WalletDebited` events) and the `ReconciliationService` (which iterates actual balances and compares each against `getExpectedBalance()`).
+- Added 8 new Prisma models to `prisma/schema.prisma` (BetaCohort, CohortParticipant, FeedbackRecord, ValidationRun, ReconciliationReport, SessionReplay, BugReport, PerformanceMetric) with proper indexes (cohortId, status, severity, createdAt, etc.) and unique constraints (BetaCohort.cohortId, CohortParticipant.invitationId). Discovered that Prisma 6's parser rejects inline `#` comments after `@default(...)` fields — removed all such comments (the existing identity models already follow this convention). Ran `bunx prisma db push --accept-data-loss` to sync the SQLite dev database and regenerate the Prisma client (✔ Generated Prisma Client v6.19.2).
+- Created `/home/z/my-project/src/infrastructure/launch/beta-cohort-repository-impl.ts` — `BetaCohortRepositoryImpl extends EventSourcedRepositoryBase<BetaCohortAggregate> implements BetaCohortRepository`. Constructor takes `EventStore + SnapshotStore | null + OutboxRepository | null`. `createAggregate(id)` returns `new BetaCohortAggregate(id)`. Adds `getByCohortId(cohortId)` and `listActiveIdsByPhase(phase)` read-model lookups on the `BetaCohort` projection (the read model is maintained by a future cohort projector; the repository never mutates it).
+- Created `/home/z/my-project/src/infrastructure/launch/prisma-feedback-repository.ts` — `PrismaFeedbackRepository implements FeedbackRepository`. CRUD for feedback records with `submit()` (auto-sets `status='new'`), `triage()` (stamps `triagedAt`/`triagedBy`/`triageNotes`/`assignedTo`), `countByStatus()`/`countBySeverity()` via `groupBy` aggregations, and `list()` with multi-filter support (cohortId/category/severity/status + limit/offset). Validates status/severity/category enums on read.
+- Created `/home/z/my-project/src/infrastructure/launch/prisma-validation-run-repository.ts` — `PrismaValidationRunRepository implements ValidationRunRepository`. `start()` creates a row with `status='running'` and zero counts; `complete()` stamps the final status + check counts + durationMs + JSON-encoded report. `getLatest(suite)` returns the most recent run for a suite; `list(limit)` returns the most recent across all suites.
+- Created `/home/z/my-project/src/infrastructure/launch/prisma-reconciliation-repository.ts` — `PrismaReconciliationRepository implements ReconciliationRepository`. `save()` is an upsert (idempotent re-saves allowed for re-reconciliation). `getLatest()`/`list(limit)` back the dashboard widgets. `details` field is JSON-encoded.
+- Created `/home/z/my-project/src/infrastructure/launch/prisma-session-replay-repository.ts` — `PrismaSessionReplayRepository implements SessionReplayRepository`. Stores summary metadata only (sessionId, userId, cohortId, durationSeconds, eventCount, recordedAt, storageKey, metadata JSON). The heavy rrweb event stream lives in the StorageProvider — only the storageKey is persisted. `list({cohortId, userId, limit, offset})` supports both cohort-dashboard and user-debug views.
+- Created `/home/z/my-project/src/infrastructure/launch/prisma-bug-repository.ts` — `PrismaBugRepository implements BugRepository`. `report()` creates with `status='open'`; `assign()` sets `assignedTo` (auto-transitions open → in_progress if needed); `resolve()` stamps `resolvedBy`/`resolvedAt`/`resolution` and maps the resolution category (fixed/wont_fix/duplicate/invalid) to the matching status. `countBySeverity()`/`countByStatus()` accept an optional cohortId for per-cohort drill-down.
+- Created `/home/z/my-project/src/infrastructure/launch/prisma-performance-metric-repository.ts` — `PrismaPerformanceMetricRepository implements PerformanceMetricRepository`. `record()` auto-classifies status against the threshold: `ok` if within threshold, `warning` if up to 2× threshold, `critical` beyond 2× (no-threshold case: `ok` at 0, `warning` at 1–10, `critical` above 10 — suitable for error counts). `getLatest(metric)` returns the most recent sample; `list(metrics, limit)` supports metric-name filtering; `getSummary()` returns the latest value + status + threshold per metric (dedupes in JS since SQLite doesn't support DISTINCT ON).
+- Created `/home/z/my-project/src/infrastructure/launch/reconciliation-source.ts` — `PrismaReconciliationSource implements ReconciliationSource`. `getWalletBalances()` queries the `WalletReadModel` projection. `getExpectedBalance(playerId)` loads events from the `WalletAggregate-<playerId>` stream via `eventStore.load()`, sums `WalletDeposited` payloads and subtracts `WalletWithdrawn`/`WalletDebited` payloads. `getTransactionCount()` scans the entire event store via the `replay()` cursor API (batches of 1000) counting `WalletDeposited`/`WalletWithdrawn`/`MinutesPurchased` events — an O(N) scan acceptable for launch-size datasets.
+- Created `/home/z/my-project/src/infrastructure/launch/validation-suites.ts` — `createPlatformValidationSuites(deps)` returns 7 suites (17 checks total):
+  1. **event-replay** (2 checks) — verifies wallet balances match event replay for a 50-account sample; verifies the event store `replay()` API works.
+  2. **ledger-integrity** (2 checks) — runs the `ReconciliationService` end-to-end; verifies transaction count is non-negative.
+  3. **ai-quality** (2 checks) — pings `/api/health`; POSTs a minimal payload to `/api/ai/generate`.
+  4. **security** (2 checks) — verifies `/api/auth/login` rejects invalid credentials (not 200 or 500); verifies the `RateLimiter` throttles a 3-in-2-second burst.
+  5. **extension-runtime** (2 checks) — verifies the event store is readable (the foundational capability the extension runtime will build on); tracks the extension runtime itself as a known-gap failure with an actionable message.
+  6. **session-replay** (3 checks) — verifies the `SessionReplayRepository.list()` works; verifies sampled replays have non-empty `storageKey` values; round-trips a tiny object through the `StorageProvider` to verify playback is possible.
+  7. **data-integrity** (4 checks) — checks for orphaned wallet read models (no backing events), stuck outbox messages (failed + max retries), missing projection checkpoints (indicates the projection worker isn't running), and duplicate event IDs (safety net for the unique constraint).
+  
+  Every check returns `{ passed, message, details, durationMs: 0 }` — never throws. If a dependency is missing (e.g. `rateLimiter` not wired), the check returns `passed: false` with a clear actionable message instead. HTTP checks use `fetchWithTimeout()` (default 5s, 10s for AI generation) so a hung endpoint can't stall the suite. Base URL resolves from `deps.baseUrl` → `getEnvVar('VALIDATION_BASE_URL')` → `http://localhost:3000`.
+- Created `/home/z/my-project/src/infrastructure/launch/prisma-models.txt` documenting all 8 Prisma models field-by-field with index rationale (matches the existing identity `prisma-models.txt` format).
+- Verified `bun run lint` passes (0 errors, 0 warnings) and `bun run scripts/check-architecture.ts` passes (0 violations, 297 files scanned — up from 263 pre-LAUNCH-3). Fixed one initial architecture violation: a `process.env` mention in a docstring comment (replaced with "raw env access"). Fixed one initial lint warning: an unused `eslint-disable-next-line` directive in `reconciliation-source.ts`.
+- Verified `bunx tsc --noEmit --skipLibCheck` reports 0 errors in any of the 10 new files (pre-existing errors in `src/shared/types/result.ts` and unrelated domain event files are not affected by this work).
+- Smoke-tested all 10 modules end-to-end:
+  - DB round-trips for all 6 Prisma repositories: feedback submit → getById → triage → countByStatus; validation start → complete → getLatest; bug report → assign → resolve; performance metric record → getLatest → getSummary (verified auto-classified status: 250ms vs 200ms threshold → `warning`); reconciliation save → getLatest; session replay save → getById. All round-trips passed and were cleaned up.
+  - Ran all 17 validation checks end-to-end against the live SQLite DB: 9 passed (event store, ledger, data integrity), 8 failed gracefully with clear actionable messages (AI endpoints not running, rate limiter not wired, extension runtime not built, session replay deps not wired) — exactly matching the spec's "if a dependency is unavailable, the check should return `passed: false` with a clear message (not throw)" requirement.
+
+Stage Summary:
+- 10 new files created exactly at the requested paths:
+  1. `src/infrastructure/launch/beta-cohort-repository-impl.ts` — event-sourced `BetaCohortRepository` impl with `getByCohortId`/`listActiveIdsByPhase` read-model lookups.
+  2. `src/infrastructure/launch/prisma-feedback-repository.ts` — CRUD feedback pipeline with triage + `groupBy` aggregations.
+  3. `src/infrastructure/launch/prisma-validation-run-repository.ts` — validation run lifecycle (start/complete/getById/list/getLatest).
+  4. `src/infrastructure/launch/prisma-reconciliation-repository.ts` — reconciliation report persistence (upsert + getLatest/list).
+  5. `src/infrastructure/launch/prisma-session-replay-repository.ts` — session replay summary storage (heavy event stream lives in StorageProvider).
+  6. `src/infrastructure/launch/prisma-bug-repository.ts` — bug lifecycle (report/assign/resolve + countBySeverity/countByStatus).
+  7. `src/infrastructure/launch/prisma-performance-metric-repository.ts` — time-series metrics with auto-classified status (ok/warning/critical).
+  8. `src/infrastructure/launch/reconciliation-source.ts` — `ReconciliationSource` impl: actual balances from `WalletReadModel`, expected balances from event stream replay, transaction count from full event-store scan.
+  9. `src/infrastructure/launch/validation-suites.ts` — 7 suites / 17 real checks (event-replay, ledger-integrity, ai-quality, security, extension-runtime, session-replay, data-integrity); all checks graceful-degrade instead of throwing.
+  10. `src/infrastructure/launch/prisma-models.txt` — schema documentation for all 8 launch Prisma models.
+- Prisma schema extended with 8 new models (BetaCohort, CohortParticipant, FeedbackRecord, ValidationRun, ReconciliationReport, SessionReplay, BugReport, PerformanceMetric). `bunx prisma db push` applied successfully and Prisma client regenerated.
+- All architecture rules respected: `import type` for type-only imports throughout (regular import only for instantiated classes like `BetaCohortAggregate`, `EventSourcedRepositoryBase`, `ReconciliationService`); no `any` types; no `process.env` literals (uses `getEnvVar()` for the validation base URL); no Prisma outside `src/infrastructure/`; no ES2015 namespaces; all DB access via `getClient()` (transaction-context aware); all log calls go through `logger.database()` / `logger.system()`.
+- `bun run lint` passes (0 errors, 0 warnings). `bun run scripts/check-architecture.ts` passes (0 violations, 297 files scanned). `bunx tsc --noEmit --skipLibCheck` reports 0 errors in the 10 new files.
+- All 6 Prisma repositories DB round-trip tested; all 17 validation checks executed end-to-end against the live SQLite DB.
+- NEXT (for composition root / main agent): (1) Wire `BetaCohortRepositoryImpl` into a new `TOKENS.BetaCohortRepository` token, passing the existing `EventStore`/`SnapshotStore`/`OutboxRepository` singletons. (2) Wire the 6 Prisma repositories into new tokens (`TOKENS.FeedbackRepository`, `TOKENS.ValidationRunRepository`, `TOKENS.ReconciliationRepository`, `TOKENS.SessionReplayRepository`, `TOKENS.BugRepository`, `TOKENS.PerformanceMetricRepository`). (3) Wire `PrismaReconciliationSource` into `TOKENS.ReconciliationSource`, passing the existing `EventStore`. (4) Build a `BetaCohortProjector` (handling `BetaCohortCreated`/`ParticipantInvited`/`InvitationAccepted`/`InvitationRevoked`) that maintains the `BetaCohort` + `CohortParticipant` read models — register it on the `ProjectionEngine` alongside the existing Game/Wallet/Leaderboard/Statistics/Identity projectors. (5) Register the 12 launch events via `registerLaunchEvents()` in the composition root. (6) Register the `ValidationSuiteRunner` as a singleton, register all 7 suites from `createPlatformValidationSuites({ eventStore, reconciliationSource, sessionReplayRepository, storageProvider, rateLimiter })`, and add a scheduled job that runs each suite on a configured cadence (e.g. hourly for ledger-integrity, daily for data-integrity). (7) Add API routes that expose the launch dashboard endpoints: `GET /api/admin/launch/feedback`, `GET /api/admin/launch/validation-runs`, `GET /api/admin/launch/reconciliation`, `GET /api/admin/launch/bugs`, `GET /api/admin/launch/metrics`, `POST /api/admin/launch/validation/run/:suite`, `POST /api/admin/launch/reconciliation/run`. (8) Build the launch dashboard UI on top of those endpoints (a new tab in the existing `/admin` page) showing the cohort overview, validation run history, reconciliation status, bug backlog, and live performance metrics.
+
+---
+Task ID: LAUNCH-5
+Agent: frontend-styling-expert
+Task: Build Launch & Scale dashboard UI
+
+Work Log:
+- Read worklog.md and existing page.tsx + admin/page.tsx to understand the established design language (dark slate-950 / emerald+cyan accents, monospace technical data, SectionHeader / StatusBadge / LoadingRow / ErrorBanner / EmptyState helpers, Toaster from sonner, min-h-screen flex flex-col root + mt-auto footer).
+- Inspected launch API handlers (`src/interfaces/api/launch/launch-handlers.ts`) and all Phase A / Phase B query & command schemas (`src/application/queries/launch/*`, `src/application/commands/launch/schemas.ts`) to map response shapes for ValidationRunRecord, ReconciliationRecord, BugRecord, PerformanceMetricRecord, SessionReplayRecord, BetaCohortView, ParticipantView, FeedbackRecord, and the BetaMetrics aggregate.
+- Inspected the 7 validation suite names from `src/infrastructure/launch/validation-suites.ts` (event-replay, ledger-integrity, ai-quality, security, extension-runtime, session-replay, data-integrity) so the suite cards match the real runner registry.
+- Created `/home/z/my-project/src/app/launch/page.tsx` — a single `'use client'` file implementing the full Launch & Scale dashboard. Structure:
+  - Root layout: `dark flex min-h-screen flex-col bg-slate-950`, BackgroundGrid (emerald/cyan blurred orbs over a 48px dotted grid), LaunchHeader (Phase A/B badges + nav links to `/` and `/admin`), main content, and LaunchFooter (`mt-auto` sticky footer).
+  - Top-level `<Tabs>` with two tabs: "Phase A — Internal Alpha" and "Phase B — Closed Beta".
+  - **Phase A sections** (vertical stack):
+    1. ValidationSuiteRunner — 7-card grid with status badge (passed/failed/partial/running/never), last-run timestamp, checks breakdown, and "Run Suite" button that POSTs to `/api/launch/alpha/validation/start` with `{suite, triggeredBy:'admin'}`. Per-card loading spinner via sonner toast. Auto-refreshes recent-runs table every 10 seconds via `window.setInterval`.
+    2. LedgerReconciliation — "Run Reconciliation" button → POST `/api/launch/alpha/reconciliation/run` with `{period:'2024-Q1'}`; latest summary card (status, expected, actual, discrepancy, matched/total); JSON details pre block; recent runs table; fetches list + latest in parallel.
+    3. BugTriage — stats bar (Open / In Progress / Fixed / Won't Fix) from `/api/launch/alpha/bugs/stats`; "Report Bug" dialog (title, description, severity, category, reportedBy, cohortId) → POST `/api/launch/alpha/bugs`; bug table with resolve action; Resolve dialog (resolution select + resolvedBy) → POST `/api/launch/alpha/bugs/resolve`.
+    4. PerformanceMetrics — grid of metric cards from `/api/launch/alpha/performance`; each shows value (smart formatting for latency/%/memory), status badge (ok/warning/critical), threshold, and a ProgressBar with tone-specific indicator. Empty-state placeholder when no metrics.
+    5. SessionReplays — table from `/api/launch/alpha/session-replays` showing sessionId/userId/cohort/duration/eventCount/recordedAt/storageKey.
+    6. ExitCriteriaChecklist — auto-derived gate that fetches latest reconciliation + validation runs + bug stats, then checks: No critical bugs, No data corruption (data-integrity suite passing), Financial reconciliation at 100% (status=balanced), Stable event replay (event-replay suite passing), Crash rate below target (pending — left as unknown since crash-rate metric isn't directly exposed). Renders with Progress, pass/fail/pending icons, and a "X / 5 satisfied" header badge.
+  - **Phase B sections** (vertical stack):
+    1. BetaCohorts — "Create Cohort" dialog (name, phase, maxParticipants, createdById) → POST `/api/launch/beta/cohorts/create`; cohort cards showing accepted/pending/max counts, capacity ProgressBar, active badge; click card → opens participants dialog that GETs `/api/launch/beta/cohorts/{cohortId}/participants` (gracefully degrades — the route isn't registered, so the dialog shows an EmptyState).
+    2. Invitations — "Invite Participant" dialog (cohortId select, userId, email, role, invitedBy) → POST `/api/launch/beta/invitations/invite` with auto-generated +7d expiresAt; pending invitations table with Accept (POST `/accept`) and Revoke (POST `/revoke`) actions.
+    3. FeedbackPipeline — stats bar (New / Triaged / In Progress / Resolved / Won't Fix) from `/api/launch/beta/feedback/stats`; "Submit Feedback" dialog → POST `/api/launch/beta/feedback`; feedback table with Triage action; Triage dialog (status select, assignedTo, notes) → POST `/api/launch/beta/feedback/triage`.
+    4. BetaMetricsSummary — overview cards (total cohorts, total participants, open feedback, open bugs) + two StatusBreakdown cards (feedback by status, bugs by status) using tone-coded progress bars.
+  - Helpers: `apiGet`/`apiPost` (wrap fetch, throw on `!ok`); `formatRelativeTime` ("2 minutes ago"); `formatDuration`, `formatBalance`, `formatMetricValue`; tone resolvers for validation/reconciliation/bug/severity/feedback/metric/invitation/phase; `StatusBadge`, `MonoCell`, `LoadingRow`, `ErrorBanner`, `EmptyState`, `SectionHeader`, `SpinnerButton`, `MetricTile`, `StatCard`, `ProgressBar` (wraps shadcn/ui Progress with a Tailwind arbitrary-variant `[&>[data-slot=progress-indicator]]:bg-*` selector keyed off a tone lookup table so Tailwind's JIT sees the literal classes).
+  - Used Lucide icons as specified: FlaskConical, Users, Bug, CheckCircle, XCircle, AlertTriangle, Play, RefreshCw, TrendingUp, Activity, ShieldCheck, FileText, Send (plus Plus, Loader2, AlertTriangle as supporting).
+  - All IDs, timestamps, run IDs, storage keys, JSON details rendered in `font-mono` per the design spec.
+  - Status badge color mapping matches the spec: green=passed/balanced/accepted/ok/fixed/resolved; amber=pending/partial/warning/in_progress/triaged; red=failed/discrepancy/critical/open/expired/revoked; gray=never/wont_fix/duplicate/invalid/low.
+  - Toast notifications (sonner) on every API action with loading → success/error transitions.
+  - Loading skeletons during fetch; error banners with retry buttons on fetch failures; empty-state placeholders when collections are empty.
+- Lint verification: `bun run lint` exits 0 (no errors, no warnings). `npx tsc --noEmit --skipLibCheck` reports 0 errors in `src/app/launch/page.tsx` (other pre-existing errors in the repo, e.g. `src/app/api/launch/beta/feedback/route.ts` missing `handleSubmitFeedback` import, were left untouched per the "Do NOT modify any other files" constraint).
+
+Stage Summary:
+- New page `/launch` fully implements the Launch & Scale dashboard spec: dark slate-950 + emerald/cyan theme, mobile-first responsive grid layouts, sticky footer (`mt-auto`), `'use client'` directive, all required shadcn/ui components (Card, Badge, Button, Input, Label, Select, Tabs, ScrollArea, Table, Dialog, Textarea, Progress), and the specified Lucide icons.
+- Phase A tab delivers all 6 sections (Validation Suite Runner with 10s auto-refresh, Ledger Reconciliation, Bug Triage with report/resolve dialogs, Performance Metrics, Session Replays, Exit Criteria Checklist with auto-derived gates from live API data).
+- Phase B tab delivers all 4 sections (Beta Cohorts with create + click-to-view-participants, Invitations with invite/accept/revoke, Feedback Pipeline with submit/triage dialogs, Beta Metrics Summary with status breakdowns).
+- The page wires every endpoint listed in the task: validation list/start, reconciliation list/run/latest, bugs list/stats/report/resolve, performance, session-replays, cohort list/create, participants lookup (graceful fallback), invitations invite/accept/revoke, feedback list/stats/submit/triage, beta metrics.
+- Lint passes; TypeScript clean for the new file. Pre-existing bug noted in `/api/launch/beta/feedback/route.ts` (missing `handleSubmitFeedback` import) — left unmodified per task constraints; the Submit Feedback UI will surface the error gracefully via toast when the endpoint fails.

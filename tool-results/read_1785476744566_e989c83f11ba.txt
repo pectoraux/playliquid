@@ -1,0 +1,2002 @@
+   419→          <PrometheusMetrics />
+   420→          <Separator className="my-12 bg-slate-800" />
+   421→          <FeatureFlagsManager />
+   422→        </main>
+   423→        <Footer />
+   424→      </div>
+   425→    </div>
+   426→  )
+   427→}
+   428→
+   429→// ─── Background ───────────────────────────────────────────────────────────────
+   430→
+   431→function BackgroundGrid() {
+   432→  return (
+   433→    <div
+   434→      aria-hidden
+   435→      className="pointer-events-none absolute inset-0 z-0 h-full w-full bg-[linear-gradient(to_right,rgba(16,185,129,0.04)_1px,transparent_1px),linear-gradient(to_bottom,rgba(16,185,129,0.04)_1px,transparent_1px)] bg-[size:48px_48px]"
+   436→    >
+   437→      <div className="absolute inset-0 bg-gradient-to-b from-slate-950/0 via-slate-950/40 to-slate-950" />
+   438→      <div className="absolute -top-40 left-1/2 h-80 w-[40rem] -translate-x-1/2 rounded-full bg-emerald-500/10 blur-3xl" />
+   439→      <div className="absolute top-1/3 -right-40 h-72 w-72 rounded-full bg-cyan-500/10 blur-3xl" />
+   440→    </div>
+   441→  )
+   442→}
+   443→
+   444→// ─── Header / Hero ────────────────────────────────────────────────────────────
+   445→
+   446→function Header() {
+   447→  return (
+   448→    <header className="relative border-b border-slate-800/80 bg-slate-950/60 backdrop-blur-sm">
+   449→      <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-12 sm:px-6 lg:px-8 lg:py-16">
+   450→        <div className="flex flex-wrap items-center gap-3 text-xs font-mono uppercase tracking-[0.25em] text-emerald-400/80">
+   451→          <span className="inline-flex items-center gap-1.5">
+   452→            <CircleDot className="h-3.5 w-3.5" />
+   453→            playliquid
+   454→          </span>
+   455→          <span className="text-slate-600">/</span>
+   456→          <span className="text-slate-400">milestone 1 → 2</span>
+   457→          <span className="text-slate-600">/</span>
+   458→          <span className="text-emerald-400">production infrastructure</span>
+   459→        </div>
+   460→        <div className="flex flex-col gap-4">
+   461→          <h1 className="font-mono text-4xl font-bold tracking-tight text-zinc-50 sm:text-5xl lg:text-6xl">
+   462→            Play<span className="text-emerald-400">Liquid</span>
+   463→          </h1>
+   464→          <p className="font-mono text-base text-cyan-300/90 sm:text-lg">
+   465→            Production-Grade Event-Driven Architecture
+   466→          </p>
+   467→          <p className="max-w-3xl text-sm text-slate-400 sm:text-base">
+   468→            A reference implementation of a gaming platform built on strict
+   469→            Domain-Driven Design, Command-Query Responsibility Segregation,
+   470→            Event Sourcing, and the Transactional Outbox pattern.
+   471→          </p>
+   472→          <div className="flex flex-wrap items-center gap-2 pt-2 font-mono text-xs text-slate-400">
+   473→            <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
+   474→              DDD
+   475→            </Badge>
+   476→            <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
+   477→              CQRS
+   478→            </Badge>
+   479→            <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-300">
+   480→              Event Sourcing
+   481→            </Badge>
+   482→            <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-300">
+   483→              Outbox Pattern
+   484→            </Badge>
+   485→            <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/15 text-emerald-300">
+   486→              Redis
+   487→            </Badge>
+   488→            <Badge variant="outline" className="border-cyan-500/40 bg-cyan-500/15 text-cyan-300">
+   489→              Workers
+   490→            </Badge>
+   491→            <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/15 text-emerald-300">
+   492→              Metrics
+   493→            </Badge>
+   494→            <Badge variant="outline" className="border-cyan-500/40 bg-cyan-500/15 text-cyan-300">
+   495→              Feature Flags
+   496→            </Badge>
+   497→          </div>
+   498→        </div>
+   499→        <div className="flex flex-wrap items-center gap-3 pt-2">
+   500→          <Badge
+   501→            variant="outline"
+   502→            className="gap-1.5 border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-emerald-300"
+   503→          >
+   504→            <CheckCircle2 className="h-3.5 w-3.5" />
+   505→            Boundaries Verified
+   506→          </Badge>
+   507→          <Badge
+   508→            variant="outline"
+   509→            className="gap-1.5 border-slate-700 bg-slate-900/60 px-3 py-1 font-mono text-slate-400"
+   510→          >
+   511→            <Layers className="h-3.5 w-3.5" />
+   512→            5-Layer Onion
+   513→          </Badge>
+   514→          <Badge
+   515→            variant="outline"
+   516→            className="gap-1.5 border-slate-700 bg-slate-900/60 px-3 py-1 font-mono text-slate-400"
+   517→          >
+   518→            <GitBranch className="h-3.5 w-3.5" />
+   519→            Strict Dependency Rules
+   520→          </Badge>
+   521→        </div>
+   522→      </div>
+   523→    </header>
+   524→  )
+   525→}
+   526→
+   527→// ─── Architecture Layers ──────────────────────────────────────────────────────
+   528→
+   529→function ArchitectureLayers() {
+   530→  return (
+   531→    <section id="architecture" className="scroll-mt-8">
+   532→      <SectionHeading
+   533→        index="01"
+   534→        title="Architecture Layers"
+   535→        description="A strict onion architecture — each layer may only depend on layers below it. Boundary rules are enforced by ESLint and a CI checker."
+   536→        icon={Layers}
+   537→      />
+   538→      <div className="mt-8 grid gap-4 lg:grid-cols-5">
+   539→        {ARCHITECTURE_LAYERS.map((layer, idx) => {
+   540→          const Icon = layer.icon
+   541→          const accent = accentClasses(layer.accent)
+   542→          return (
+   543→            <Card
+   544→              key={layer.name}
+   545→              className={`relative border-slate-800 bg-slate-900/50 py-5 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60 transition-colors hover:border-slate-700`}
+   546→            >
+   547→              <CardHeader className="gap-3 px-5">
+   548→                <div className="flex items-center justify-between">
+   549→                  <div
+   550→                    className={`flex h-9 w-9 items-center justify-center rounded-lg ${accent.bg} ${accent.border} border ring-1 ring-inset ${accent.ring}`}
+   551→                  >
+   552→                    <Icon className={`h-4.5 w-4.5 ${accent.text}`} />
+   553→                  </div>
+   554→                  <span className="font-mono text-[10px] uppercase tracking-widest text-slate-600">
+   555→                    L{idx + 1}
+   556→                  </span>
+   557→                </div>
+   558→                <CardTitle className="font-mono text-base text-zinc-100">
+   559→                  {layer.name}
+   560→                </CardTitle>
+   561→                <CardDescription className="text-xs text-slate-400">
+   562→                  {layer.description}
+   563→                </CardDescription>
+   564→              </CardHeader>
+   565→              <CardContent className="px-5">
+   566→                <div className="flex flex-wrap gap-1.5">
+   567→                  {layer.components.map((c) => (
+   568→                    <Badge
+   569→                      key={c}
+   570→                      variant="outline"
+   571→                      className={`border-slate-700 bg-slate-950/60 px-2 py-0.5 font-mono text-[10px] text-slate-300`}
+   572→                    >
+   573→                      {c}
+   574→                    </Badge>
+   575→                  ))}
+   576→                </div>
+   577→              </CardContent>
+   578→              {idx < ARCHITECTURE_LAYERS.length - 1 && (
+   579→                <div className="absolute -right-2 top-1/2 z-10 hidden -translate-y-1/2 lg:block">
+   580→                  <ArrowRight className="h-4 w-4 text-slate-700" />
+   581→                </div>
+   582→              )}
+   583→            </Card>
+   584→          )
+   585→        })}
+   586→      </div>
+   587→      <div className="mt-4 flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/40 px-4 py-3 font-mono text-xs text-slate-400">
+   588→        <Terminal className="h-3.5 w-3.5 text-emerald-400" />
+   589→        <span>
+   590→          Dependency direction:{' '}
+   591→          <span className="text-emerald-300">Shared</span> ←{' '}
+   592→          <span className="text-emerald-300">Domain</span> ←{' '}
+   593→          <span className="text-cyan-300">Application</span> ←{' '}
+   594→          <span className="text-cyan-300">Infrastructure</span> ←{' '}
+   595→          <span className="text-emerald-300">Interfaces</span>
+   596→        </span>
+   597→      </div>
+   598→    </section>
+   599→  )
+   600→}
+   601→
+   602→// ─── Health Dashboard ─────────────────────────────────────────────────────────
+   603→
+   604→function HealthDashboard() {
+   605→  const { toast } = useToast()
+   606→  const [health, setHealth] = React.useState<HealthResponse | null>(null)
+   607→  const [error, setError] = React.useState<string | null>(null)
+   608→  const [loading, setLoading] = React.useState(true)
+   609→  const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null)
+   610→  const [paused, setPaused] = React.useState(false)
+   611→
+   612→  const fetchHealth = React.useCallback(async () => {
+   613→    try {
+   614→      const res = await fetch('/api/health', { cache: 'no-store' })
+   615→      if (!res.ok) {
+   616→        throw new Error(`HTTP ${res.status}`)
+   617→      }
+   618→      const data = (await res.json()) as HealthResponse
+   619→      setHealth(data)
+   620→      setError(null)
+   621→      setLastUpdated(new Date())
+   622→    } catch (e) {
+   623→      const msg = e instanceof Error ? e.message : 'Failed to fetch health'
+   624→      setError(msg)
+   625→    } finally {
+   626→      setLoading(false)
+   627→    }
+   628→  }, [])
+   629→
+   630→  React.useEffect(() => {
+   631→    void fetchHealth()
+   632→    if (paused) return
+   633→    const interval = setInterval(() => void fetchHealth(), 5000)
+   634→    return () => clearInterval(interval)
+   635→  }, [fetchHealth, paused])
+   636→
+   637→  const overall = health?.status ?? 'unhealthy'
+   638→
+   639→  const handleRefresh = () => {
+   640→    setLoading(true)
+   641→    void fetchHealth()
+   642→    toast({
+   643→      title: 'Health refreshed',
+   644→      description: 'Re-ran all infrastructure health checks.',
+   645→    })
+   646→  }
+   647→
+   648→  return (
+   649→    <section id="health" className="scroll-mt-8">
+   650→      <SectionHeading
+   651→        index="02"
+   652→        title="Live Health Dashboard"
+   653→        description="Real-time status of every infrastructure component. Auto-refreshes every 5 seconds."
+   654→        icon={Activity}
+   655→        action={
+   656→          <div className="flex items-center gap-2">
+   657→            <Button
+   658→              variant="outline"
+   659→              size="sm"
+   660→              onClick={() => setPaused((p) => !p)}
+   661→              className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-300 hover:bg-slate-800 hover:text-zinc-100"
+   662→            >
+   663→              {paused ? 'Resume' : 'Pause'}
+   664→            </Button>
+   665→            <Button
+   666→              variant="outline"
+   667→              size="sm"
+   668→              onClick={handleRefresh}
+   669→              disabled={loading}
+   670→              className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-300 hover:bg-slate-800 hover:text-zinc-100"
+   671→            >
+   672→              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+   673→              Refresh
+   674→            </Button>
+   675→          </div>
+   676→        }
+   677→      />
+   678→
+   679→      <div className="mt-8 grid gap-4 lg:grid-cols-[1.2fr_2fr]">
+   680→        {/* Overall status */}
+   681→        <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+   682→          <CardHeader>
+   683→            <div className="flex items-center justify-between">
+   684→              <CardTitle className="font-mono text-sm uppercase tracking-wider text-slate-300">
+   685→                Overall Status
+   686→              </CardTitle>
+   687→              <StatusDot status={overall} />
+   688→            </div>
+   689→            <CardDescription className="text-xs">
+   690→              Aggregated from all registered health checks.
+   691→            </CardDescription>
+   692→          </CardHeader>
+   693→          <CardContent className="space-y-4">
+   694→            <div
+   695→              className={`rounded-lg border px-4 py-3 ${statusColor(overall)}`}
+   696→            >
+   697→              <div className="flex items-center justify-between">
+   698→                <span className="font-mono text-2xl font-bold uppercase">
+   699→                  {loading && !health ? '...' : overall}
+   700→                </span>
+   701→                <Activity className="h-5 w-5 opacity-70" />
+   702→              </div>
+   703→            </div>
+   704→            <div className="grid grid-cols-2 gap-2 font-mono text-xs">
+   705→              <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2">
+   706→                <div className="text-slate-500">Checks</div>
+   707→                <div className="text-zinc-200">{health?.checks.length ?? 0}</div>
+   708→              </div>
+   709→              <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2">
+   710→                <div className="text-slate-500">Last Updated</div>
+   711→                <div className="text-zinc-200">
+   712→                  {lastUpdated ? lastUpdated.toLocaleTimeString() : '—'}
+   713→                </div>
+   714→              </div>
+   715→            </div>
+   716→            {error && (
+   717→              <div className="flex items-start gap-2 rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+   718→                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+   719→                <span className="font-mono">{error}</span>
+   720→              </div>
+   721→            )}
+   722→          </CardContent>
+   723→        </Card>
+   724→
+   725→        {/* Per-component */}
+   726→        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+   727→          {loading && !health ? (
+   728→            <HealthCardSkeletons />
+   729→          ) : health && health.checks.length > 0 ? (
+   730→            health.checks.map((check) => (
+   731→              <HealthCheckCard key={check.name} check={check} />
+   732→            ))
+   733→          ) : (
+   734→            <div className="col-span-full flex items-center justify-center rounded-lg border border-dashed border-slate-800 py-12 text-sm text-slate-500">
+   735→              No health checks registered.
+   736→            </div>
+   737→          )}
+   738→        </div>
+   739→      </div>
+   740→    </section>
+   741→  )
+   742→}
+   743→
+   744→function HealthCheckCard({ check }: { check: HealthCheck }) {
+   745→  const Icon = COMPONENT_ICONS[check.name] ?? Server
+   746→  const details = check.details ?? {}
+   747→  return (
+   748→    <Card className="border-slate-800 bg-slate-900/40 py-4 ring-1 ring-inset ring-slate-800/40">
+   749→      <CardHeader className="gap-2 px-4">
+   750→        <div className="flex items-center justify-between gap-2">
+   751→          <div className="flex items-center gap-2">
+   752→            <div className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-700 bg-slate-950/60">
+   753→              <Icon className="h-3.5 w-3.5 text-slate-300" />
+   754→            </div>
+   755→            <span className="font-mono text-sm text-zinc-100">{check.name}</span>
+   756→          </div>
+   757→          <StatusDot status={check.status} />
+   758→        </div>
+   759→      </CardHeader>
+   760→      <CardContent className="space-y-2 px-4">
+   761→        <div className="flex items-center justify-between font-mono text-xs">
+   762→          <span className="text-slate-500">Status</span>
+   763→          <span
+   764→            className={`rounded border px-1.5 py-0.5 uppercase ${statusColor(check.status)}`}
+   765→          >
+   766→            {check.status}
+   767→          </span>
+   768→        </div>
+   769→        <div className="flex items-center justify-between font-mono text-xs">
+   770→          <span className="text-slate-500">Latency</span>
+   771→          <span className="text-cyan-300">{check.latencyMs} ms</span>
+   772→        </div>
+   773→        {Object.keys(details).length > 0 && (
+   774→          <div className="mt-2 border-t border-slate-800 pt-2">
+   775→            <pre className="overflow-x-auto font-mono text-[10px] leading-tight text-slate-400">
+   776→              {JSON.stringify(details, null, 2)}
+   777→            </pre>
+   778→          </div>
+   779→        )}
+   780→      </CardContent>
+   781→    </Card>
+   782→  )
+   783→}
+   784→
+   785→function HealthCardSkeletons() {
+   786→  return (
+   787→    <>
+   788→      {Array.from({ length: 5 }).map((_, i) => (
+   789→        <Card
+   790→          key={i}
+   791→          className="border-slate-800 bg-slate-900/40 py-4 ring-1 ring-inset ring-slate-800/40"
+   792→        >
+   793→          <CardContent className="flex items-center gap-2 px-4">
+   794→            <Loader2 className="h-4 w-4 animate-spin text-emerald-400/60" />
+   795→            <span className="font-mono text-xs text-slate-500">Loading…</span>
+   796→          </CardContent>
+   797→        </Card>
+   798→      ))}
+   799→    </>
+   800→  )
+   801→}
+   802→
+   803→// ─── Event Sourcing Demo ──────────────────────────────────────────────────────
+   804→
+   805→type StepStatus = 'pending' | 'running' | 'success' | 'error'
+   806→
+   807→interface StepState {
+   808→  status: StepStatus
+   809→  result?: unknown
+   810→  error?: string
+   811→  timestamp?: string
+   812→}
+   813→
+   814→function EventSourcingDemo() {
+   815→  const { toast } = useToast()
+   816→  const [gameId, setGameId] = React.useState('')
+   817→  const [title, setTitle] = React.useState('')
+   818→  const [creatorId, setCreatorId] = React.useState('')
+   819→  const [steps, setSteps] = React.useState<Record<number, StepState>>({
+   820→    1: { status: 'pending' },
+   821→    2: { status: 'pending' },
+   822→    3: { status: 'pending' },
+   823→    4: { status: 'pending' },
+   824→  })
+   825→
+   826→  React.useEffect(() => {
+   827→    setGameId(randomGameId())
+   828→    setCreatorId(`creator_${Math.random().toString(36).slice(2, 8)}`)
+   829→    setTitle('Liquid Tournament — Season 1')
+   830→  }, [])
+   831→
+   832→  const updateStep = (n: number, patch: Partial<StepState>) =>
+   833→    setSteps((s) => ({ ...s, [n]: { ...s[n], ...patch } }))
+   834→
+   835→  const resetSteps = (keepCommand = false) =>
+   836→    setSteps({
+   837→      1: keepCommand ? steps[1] : { status: 'pending' },
+   838→      2: { status: 'pending' },
+   839→      3: { status: 'pending' },
+   840→      4: { status: 'pending' },
+   841→    })
+   842→
+   843→  // Step 1: Dispatch command
+   844→  const handleDispatch = async () => {
+   845→    if (!gameId.trim() || !title.trim() || !creatorId.trim()) {
+   846→      toast({
+   847→        title: 'Validation error',
+   848→        description: 'Game ID, Title, and Creator ID are all required.',
+   849→        variant: 'destructive',
+   850→      })
+   851→      return
+   852→    }
+   853→    updateStep(1, { status: 'running', error: undefined, result: undefined })
+   854→    try {
+   855→      const res = await fetch('/api/commands', {
+   856→        method: 'POST',
+   857→        headers: { 'Content-Type': 'application/json' },
+   858→        body: JSON.stringify({
+   859→          commandType: 'PublishGame',
+   860→          payload: { gameId, title, creatorId },
+   861→        }),
+   862→      })
+   863→      const data = (await res.json()) as CommandResponse
+   864→      if (!data.ok) {
+   865→        throw new Error(data.error ?? 'Command failed')
+   866→      }
+   867→      updateStep(1, {
+   868→        status: 'success',
+   869→        result: data.data,
+   870→        timestamp: new Date().toISOString(),
+   871→      })
+   872→      // Reset downstream steps since we have new events
+   873→      setSteps((s) => ({
+   874→        1: s[1],
+   875→        2: { status: 'pending' },
+   876→        3: { status: 'pending' },
+   877→        4: { status: 'pending' },
+   878→      }))
+   879→      toast({
+   880→        title: 'Command dispatched',
+   881→        description: `PublishGame appended to stream GameAggregate:${gameId}`,
+   882→      })
+   883→    } catch (e) {
+   884→      const msg = e instanceof Error ? e.message : 'Unknown error'
+   885→      updateStep(1, { status: 'error', error: msg })
+   886→      toast({ title: 'Command failed', description: msg, variant: 'destructive' })
+   887→    }
+   888→  }
+   889→
+   890→  // Step 2: Process outbox
+   891→  const handleOutbox = async () => {
+   892→    updateStep(2, { status: 'running', error: undefined, result: undefined })
+   893→    try {
+   894→      const res = await fetch('/api/workers/outbox', { method: 'POST' })
+   895→      const data = (await res.json()) as OutboxResponse
+   896→      updateStep(2, {
+   897→        status: 'success',
+   898→        result: data,
+   899→        timestamp: new Date().toISOString(),
+   900→      })
+   901→      toast({
+   902→        title: 'Outbox processed',
+   903→        description: `Published ${data.published} event(s).`,
+   904→      })
+   905→    } catch (e) {
+   906→      const msg = e instanceof Error ? e.message : 'Unknown error'
+   907→      updateStep(2, { status: 'error', error: msg })
+   908→      toast({ title: 'Outbox failed', description: msg, variant: 'destructive' })
+   909→    }
+   910→  }
+   911→
+   912→  // Step 3: Run projections
+   913→  const handleProjections = async () => {
+   914→    updateStep(3, { status: 'running', error: undefined, result: undefined })
+   915→    try {
+   916→      const res = await fetch('/api/workers/projections', { method: 'POST' })
+   917→      const data = (await res.json()) as ProjectionsResponse
+   918→      updateStep(3, {
+   919→        status: 'success',
+   920→        result: data,
+   921→        timestamp: new Date().toISOString(),
+   922→      })
+   923→      toast({
+   924→        title: 'Projections ran',
+   925→        description: `Projected ${data.processed} event(s) into read models.`,
+   926→      })
+   927→    } catch (e) {
+   928→      const msg = e instanceof Error ? e.message : 'Unknown error'
+   929→      updateStep(3, { status: 'error', error: msg })
+   930→      toast({
+   931→        title: 'Projections failed',
+   932→        description: msg,
+   933→        variant: 'destructive',
+   934→      })
+   935→    }
+   936→  }
+   937→
+   938→  // Step 4: Query read model
+   939→  const handleQuery = async () => {
+   940→    updateStep(4, { status: 'running', error: undefined, result: undefined })
+   941→    try {
+   942→      const res = await fetch('/api/queries', {
+   943→        method: 'POST',
+   944→        headers: { 'Content-Type': 'application/json' },
+   945→        body: JSON.stringify({
+   946→          queryType: 'GetGame',
+   947→          payload: { gameId },
+   948→        }),
+   949→      })
+   950→      const data = (await res.json()) as QueryResponse
+   951→      if (!data.ok) {
+   952→        throw new Error(data.error ?? 'Query failed')
+   953→      }
+   954→      updateStep(4, {
+   955→        status: 'success',
+   956→        result: data.data,
+   957→        timestamp: new Date().toISOString(),
+   958→      })
+   959→      toast({
+   960→        title: 'Query executed',
+   961→        description: `Read model returned for game ${gameId}.`,
+   962→      })
+   963→    } catch (e) {
+   964→      const msg = e instanceof Error ? e.message : 'Unknown error'
+   965→      updateStep(4, { status: 'error', error: msg })
+   966→      toast({ title: 'Query failed', description: msg, variant: 'destructive' })
+   967→    }
+   968→  }
+   969→
+   970→  const resetAll = () => {
+   971→    setGameId(randomGameId())
+   972→    setCreatorId(`creator_${Math.random().toString(36).slice(2, 8)}`)
+   973→    setTitle('Liquid Tournament — Season 1')
+   974→    resetSteps(false)
+   975→  }
+   976→
+   977→  return (
+   978→    <section id="demo" className="scroll-mt-8">
+   979→      <SectionHeading
+   980→        index="03"
+   981→        title="Event Sourcing Demo"
+   982→        description="Dispatch a command, publish the outbox, run projections, then query the materialized read model — the full CQRS + Event Sourcing round trip."
+   983→        icon={Zap}
+   984→        action={
+   985→          <Button
+   986→            variant="ghost"
+   987→            size="sm"
+   988→            onClick={resetAll}
+   989→            className="font-mono text-xs text-slate-400 hover:bg-slate-800/60 hover:text-zinc-100"
+   990→          >
+   991→            <RefreshCw className="h-3.5 w-3.5" />
+   992→            Reset
+   993→          </Button>
+   994→        }
+   995→      />
+   996→
+   997→      {/* Flow indicator */}
+   998→      <FlowIndicator steps={steps} />
+   999→
+  1000→      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+  1001→        {/* Step 1: Dispatch Command */}
+  1002→        <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+  1003→          <CardHeader>
+  1004→            <StepHeader
+  1005→              n={1}
+  1006→              title="Dispatch Command"
+  1007→              subtitle="POST /api/commands"
+  1008→              icon={Send}
+  1009→              status={steps[1].status}
+  1010→            />
+  1011→            <CardDescription className="text-xs">
+  1012→              Validates payload, runs authorization, opens a transaction,
+  1013→              appends events to the EventStore, and writes to the Outbox — all
+  1014→              atomically.
+  1015→            </CardDescription>
+  1016→          </CardHeader>
+  1017→          <CardContent className="space-y-3">
+  1018→            <div className="grid gap-2">
+  1019→              <Label htmlFor="gameId" className="font-mono text-xs text-slate-400">
+  1020→                Game ID
+  1021→              </Label>
+  1022→              <Input
+  1023→                id="gameId"
+  1024→                value={gameId}
+  1025→                onChange={(e) => setGameId(e.target.value)}
+  1026→                className="border-slate-700 bg-slate-950/60 font-mono text-xs text-emerald-300 focus-visible:ring-emerald-500/30"
+  1027→                spellCheck={false}
+  1028→              />
+  1029→            </div>
+  1030→            <div className="grid gap-2">
+  1031→              <Label htmlFor="title" className="font-mono text-xs text-slate-400">
+  1032→                Title
+  1033→              </Label>
+  1034→              <Input
+  1035→                id="title"
+  1036→                value={title}
+  1037→                onChange={(e) => setTitle(e.target.value)}
+  1038→                className="border-slate-700 bg-slate-950/60 font-mono text-xs text-zinc-100 focus-visible:ring-emerald-500/30"
+  1039→              />
+  1040→            </div>
+  1041→            <div className="grid gap-2">
+  1042→              <Label htmlFor="creatorId" className="font-mono text-xs text-slate-400">
+  1043→                Creator ID
+  1044→              </Label>
+  1045→              <Input
+  1046→                id="creatorId"
+  1047→                value={creatorId}
+  1048→                onChange={(e) => setCreatorId(e.target.value)}
+  1049→                className="border-slate-700 bg-slate-950/60 font-mono text-xs text-cyan-300 focus-visible:ring-emerald-500/30"
+  1050→                spellCheck={false}
+  1051→              />
+  1052→            </div>
+  1053→            <Button
+  1054→              onClick={handleDispatch}
+  1055→              disabled={steps[1].status === 'running'}
+  1056→              className="bg-emerald-600 font-mono text-xs text-white hover:bg-emerald-500"
+  1057→            >
+  1058→              {steps[1].status === 'running' ? (
+  1059→                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+  1060→              ) : (
+  1061→                <Send className="h-3.5 w-3.5" />
+  1062→              )}
+  1063→              Dispatch PublishGame
+  1064→            </Button>
+  1065→            <StepResult step={steps[1]} />
+  1066→          </CardContent>
+  1067→        </Card>
+  1068→
+  1069→        {/* Step 2: Process Outbox */}
+  1070→        <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+  1071→          <CardHeader>
+  1072→            <StepHeader
+  1073→              n={2}
+  1074→              title="Process Outbox"
+  1075→              subtitle="POST /api/workers/outbox"
+  1076→              icon={Inbox}
+  1077→              status={steps[2].status}
+  1078→            />
+  1079→            <CardDescription className="text-xs">
+  1080→              The OutboxPublisher drains pending messages from the outbox table
+  1081→              and publishes them to the EventBus — guaranteeing at-least-once
+  1082→              delivery.
+  1083→            </CardDescription>
+  1084→          </CardHeader>
+  1085→          <CardContent className="space-y-3">
+  1086→            <Button
+  1087→              onClick={handleOutbox}
+  1088→              disabled={steps[2].status === 'running' || steps[1].status !== 'success'}
+  1089→              variant="outline"
+  1090→              className="border-cyan-500/40 bg-cyan-500/10 font-mono text-xs text-cyan-300 hover:bg-cyan-500/20 hover:text-cyan-200"
+  1091→            >
+  1092→              {steps[2].status === 'running' ? (
+  1093→                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+  1094→              ) : (
+  1095→                <Inbox className="h-3.5 w-3.5" />
+  1096→              )}
+  1097→              Process Outbox Batch
+  1098→            </Button>
+  1099→            {steps[1].status !== 'success' && (
+  1100→              <p className="font-mono text-[10px] text-amber-400/80">
+  1101→                Dispatch a command first to populate the outbox.
+  1102→              </p>
+  1103→            )}
+  1104→            <StepResult step={steps[2]} />
+  1105→          </CardContent>
+  1106→        </Card>
+  1107→
+  1108→        {/* Step 3: Run Projections */}
+  1109→        <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+  1110→          <CardHeader>
+  1111→            <StepHeader
+  1112→              n={3}
+  1113→              title="Run Projections"
+  1114→              subtitle="POST /api/workers/projections"
+  1115→              icon={GitBranch}
+  1116→              status={steps[3].status}
+  1117→            />
+  1118→            <CardDescription className="text-xs">
+  1119→              The ProjectionEngine replays published events through registered
+  1120→              projectors, materializing them into optimized read models.
+  1121→            </CardDescription>
+  1122→          </CardHeader>
+  1123→          <CardContent className="space-y-3">
+  1124→            <Button
+  1125→              onClick={handleProjections}
+  1126→              disabled={steps[3].status === 'running' || steps[2].status !== 'success'}
+  1127→              variant="outline"
+  1128→              className="border-cyan-500/40 bg-cyan-500/10 font-mono text-xs text-cyan-300 hover:bg-cyan-500/20 hover:text-cyan-200"
+  1129→            >
+  1130→              {steps[3].status === 'running' ? (
+  1131→                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+  1132→              ) : (
+  1133→                <GitBranch className="h-3.5 w-3.5" />
+  1134→              )}
+  1135→              Run Projection Batch
+  1136→            </Button>
+  1137→            {steps[2].status !== 'success' && (
+  1138→              <p className="font-mono text-[10px] text-amber-400/80">
+  1139→                Process the outbox first so events are available to projectors.
+  1140→              </p>
+  1141→            )}
+  1142→            <StepResult step={steps[3]} />
+  1143→          </CardContent>
+  1144→        </Card>
+  1145→
+  1146→        {/* Step 4: Query Read Model */}
+  1147→        <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+  1148→          <CardHeader>
+  1149→            <StepHeader
+  1150→              n={4}
+  1151→              title="Query Read Model"
+  1152→              subtitle="POST /api/queries"
+  1153→              icon={Search}
+  1154→              status={steps[4].status}
+  1155→            />
+  1156→            <CardDescription className="text-xs">
+  1157→              Executes a GetGame query through the QueryBus pipeline. Reads
+  1158→              exclusively from the materialized GameReadModel — never touches the
+  1159→              event stream.
+  1160→            </CardDescription>
+  1161→          </CardHeader>
+  1162→          <CardContent className="space-y-3">
+  1163→            <Button
+  1164→              onClick={handleQuery}
+  1165→              disabled={steps[4].status === 'running' || steps[3].status !== 'success'}
+  1166→              className="bg-emerald-600 font-mono text-xs text-white hover:bg-emerald-500"
+  1167→            >
+  1168→              {steps[4].status === 'running' ? (
+  1169→                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+  1170→              ) : (
+  1171→                <Search className="h-3.5 w-3.5" />
+  1172→              )}
+  1173→              Query Game Read Model
+  1174→            </Button>
+  1175→            {steps[3].status !== 'success' && (
+  1176→              <p className="font-mono text-[10px] text-amber-400/80">
+  1177→                Run projections first so the read model is up to date.
+  1178→              </p>
+  1179→            )}
+  1180→            <StepResult step={steps[4]} />
+  1181→          </CardContent>
+  1182→        </Card>
+  1183→      </div>
+  1184→    </section>
+  1185→  )
+  1186→}
+  1187→
+  1188→function StepHeader({
+  1189→  n,
+  1190→  title,
+  1191→  subtitle,
+  1192→  icon: Icon,
+  1193→  status,
+  1194→}: {
+  1195→  n: number
+  1196→  title: string
+  1197→  subtitle: string
+  1198→  icon: React.ComponentType<{ className?: string }>
+  1199→  status: StepStatus
+  1200→}) {
+  1201→  const ringColor =
+  1202→    status === 'success'
+  1203→      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+  1204→      : status === 'error'
+  1205→      ? 'border-rose-500/40 bg-rose-500/10 text-rose-300'
+  1206→      : status === 'running'
+  1207→      ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300'
+  1208→      : 'border-slate-700 bg-slate-900/60 text-slate-400'
+  1209→  return (
+  1210→    <div className="flex items-center justify-between gap-3">
+  1211→      <div className="flex items-center gap-3">
+  1212→        <div
+  1213→          className={`flex h-8 w-8 items-center justify-center rounded-md border font-mono text-sm font-bold ${ringColor}`}
+  1214→        >
+  1215→          {n}
+  1216→        </div>
+  1217→        <div>
+  1218→          <CardTitle className="font-mono text-base text-zinc-100">
+  1219→            {title}
+  1220→          </CardTitle>
+  1221→          <p className="mt-0.5 font-mono text-[10px] text-slate-500">{subtitle}</p>
+  1222→        </div>
+  1223→      </div>
+  1224→      <Icon className="h-4 w-4 text-slate-600" />
+  1225→    </div>
+  1226→  )
+  1227→}
+  1228→
+  1229→function StepResult({ step }: { step: StepState }) {
+  1230→  if (step.status === 'pending') return null
+  1231→  if (step.status === 'running') {
+  1232→    return (
+  1233→      <div className="flex items-center gap-2 rounded-md border border-cyan-500/30 bg-cyan-500/5 px-3 py-2 font-mono text-xs text-cyan-300">
+  1234→        <Loader2 className="h-3 w-3 animate-spin" />
+  1235→        Executing…
+  1236→      </div>
+  1237→    )
+  1238→  }
+  1239→  if (step.status === 'error') {
+  1240→    return (
+  1241→      <div className="rounded-md border border-rose-500/30 bg-rose-500/5 px-3 py-2">
+  1242→        <div className="flex items-center gap-2 font-mono text-xs text-rose-300">
+  1243→          <AlertCircle className="h-3 w-3" />
+  1244→          Error
+  1245→        </div>
+  1246→        <p className="mt-1 font-mono text-[11px] text-rose-300/80">{step.error}</p>
+  1247→      </div>
+  1248→    )
+  1249→  }
+  1250→  return (
+  1251→    <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2">
+  1252→      <div className="flex items-center justify-between">
+  1253→        <div className="flex items-center gap-2 font-mono text-xs text-emerald-300">
+  1254→          <CheckCircle2 className="h-3 w-3" />
+  1255→          Success
+  1256→        </div>
+  1257→        {step.timestamp && (
+  1258→          <span className="flex items-center gap-1 font-mono text-[10px] text-slate-500">
+  1259→            <Clock className="h-2.5 w-2.5" />
+  1260→            {new Date(step.timestamp).toLocaleTimeString()}
+  1261→          </span>
+  1262→        )}
+  1263→      </div>
+  1264→      <pre className="mt-2 max-h-48 overflow-auto rounded bg-slate-950/80 p-2 font-mono text-[10px] leading-tight text-slate-300">
+  1265→        {JSON.stringify(step.result, null, 2)}
+  1266→      </pre>
+  1267→    </div>
+  1268→  )
+  1269→}
+  1270→
+  1271→function FlowIndicator({ steps }: { steps: Record<number, StepState> }) {
+  1272→  const items = [
+  1273→    { n: 1, label: 'Command', icon: Send },
+  1274→    { n: 2, label: 'Outbox', icon: Inbox },
+  1275→    { n: 3, label: 'Projection', icon: GitBranch },
+  1276→    { n: 4, label: 'Query', icon: Search },
+  1277→  ]
+  1278→  return (
+  1279→    <div className="mt-8 grid grid-cols-1 gap-2 sm:grid-cols-4">
+  1280→      {items.map((item, idx) => {
+  1281→        const state = steps[item.n]
+  1282→        const Icon = item.icon
+  1283→        const color =
+  1284→          state.status === 'success'
+  1285→            ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300'
+  1286→            : state.status === 'error'
+  1287→            ? 'border-rose-500/50 bg-rose-500/10 text-rose-300'
+  1288→            : state.status === 'running'
+  1289→            ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300'
+  1290→            : 'border-slate-800 bg-slate-900/40 text-slate-500'
+  1291→        return (
+  1292→          <React.Fragment key={item.n}>
+  1293→            <div
+  1294→              className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${color}`}
+  1295→            >
+  1296→              <div className="flex items-center gap-2">
+  1297→                <Icon className="h-3.5 w-3.5" />
+  1298→                <span className="font-mono text-xs">
+  1299→                  <span className="opacity-60">{item.n}.</span> {item.label}
+  1300→                </span>
+  1301→              </div>
+  1302→              {state.status === 'success' && <CheckCircle2 className="h-3.5 w-3.5" />}
+  1303→              {state.status === 'error' && <AlertCircle className="h-3.5 w-3.5" />}
+  1304→              {state.status === 'running' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+  1305→              {state.status === 'pending' && <CircleDot className="h-3.5 w-3.5 opacity-40" />}
+  1306→            </div>
+  1307→            {idx < items.length - 1 && (
+  1308→              <div className="hidden items-center justify-center sm:flex">
+  1309→                <ArrowRight className="h-4 w-4 text-slate-700" />
+  1310→              </div>
+  1311→            )}
+  1312→          </React.Fragment>
+  1313→        )
+  1314→      })}
+  1315→    </div>
+  1316→  )
+  1317→}
+  1318→
+  1319→// ─── Registry Display ─────────────────────────────────────────────────────────
+  1320→
+  1321→function RegistryDisplay() {
+  1322→  const { toast } = useToast()
+  1323→  const [arch, setArch] = React.useState<ArchitectureResponse | null>(null)
+  1324→  const [loading, setLoading] = React.useState(true)
+  1325→  const [error, setError] = React.useState<string | null>(null)
+  1326→
+  1327→  const fetchArch = React.useCallback(async () => {
+  1328→    try {
+  1329→      const res = await fetch('/api/architecture', { cache: 'no-store' })
+  1330→      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  1331→      const data = (await res.json()) as ArchitectureResponse
+  1332→      setArch(data)
+  1333→      setError(null)
+  1334→    } catch (e) {
+  1335→      const msg = e instanceof Error ? e.message : 'Failed to fetch architecture'
+  1336→      setError(msg)
+  1337→    } finally {
+  1338→      setLoading(false)
+  1339→    }
+  1340→  }, [])
+  1341→
+  1342→  React.useEffect(() => {
+  1343→    void fetchArch()
+  1344→  }, [fetchArch])
+  1345→
+  1346→  const handleRefresh = () => {
+  1347→    setLoading(true)
+  1348→    void fetchArch()
+  1349→    toast({ title: 'Registry refreshed' })
+  1350→  }
+  1351→
+  1352→  return (
+  1353→    <section id="registry" className="scroll-mt-8">
+  1354→      <SectionHeading
+  1355→        index="04"
+  1356→        title="Registry Display"
+  1357→        description="Live introspection of the DI container — registered event types, commands, queries, and bindings."
+  1358→        icon={Plug}
+  1359→        action={
+  1360→          <Button
+  1361→            variant="outline"
+  1362→            size="sm"
+  1363→            onClick={handleRefresh}
+  1364→            disabled={loading}
+  1365→            className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-300 hover:bg-slate-800 hover:text-zinc-100"
+  1366→          >
+  1367→            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+  1368→            Refresh
+  1369→          </Button>
+  1370→        }
+  1371→      />
+  1372→      {error ? (
+  1373→        <div className="mt-6 flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+  1374→          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+  1375→          <span className="font-mono">{error}</span>
+  1376→        </div>
+  1377→      ) : (
+  1378→        <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+  1379→          <RegistryCard
+  1380→            title="Event Types"
+  1381→            count={arch?.eventTypes.length ?? 0}
+  1382→            items={arch?.eventTypes}
+  1383→            loading={loading}
+  1384→            icon={Radio}
+  1385→            accent="emerald"
+  1386→          />
+  1387→          <RegistryCard
+  1388→            title="Command Types"
+  1389→            count={arch?.commandTypes.length ?? 0}
+  1390→            items={arch?.commandTypes}
+  1391→            loading={loading}
+  1392→            icon={Send}
+  1393→            accent="cyan"
+  1394→          />
+  1395→          <RegistryCard
+  1396→            title="Query Types"
+  1397→            count={arch?.queryTypes.length ?? 0}
+  1398→            items={arch?.queryTypes}
+  1399→            loading={loading}
+  1400→            icon={Search}
+  1401→            accent="cyan"
+  1402→          />
+  1403→          <BindingsCard bindings={arch?.bindings} loading={loading} />
+  1404→        </div>
+  1405→      )}
+  1406→    </section>
+  1407→  )
+  1408→}
+  1409→
+  1410→function RegistryCard({
+  1411→  title,
+  1412→  count,
+  1413→  items,
+  1414→  loading,
+  1415→  icon: Icon,
+  1416→  accent,
+  1417→}: {
+  1418→  title: string
+  1419→  count: number
+  1420→  items?: string[]
+  1421→  loading: boolean
+  1422→  icon: React.ComponentType<{ className?: string }>
+  1423→  accent: 'emerald' | 'cyan'
+  1424→}) {
+  1425→  const a = accentClasses(accent)
+  1426→  return (
+  1427→    <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+  1428→      <CardHeader className="gap-2">
+  1429→        <div className="flex items-center justify-between">
+  1430→          <div className="flex items-center gap-2">
+  1431→            <div className={`flex h-7 w-7 items-center justify-center rounded-md border ${a.bg} ${a.border}`}>
+  1432→              <Icon className={`h-3.5 w-3.5 ${a.text}`} />
+  1433→            </div>
+  1434→            <CardTitle className="font-mono text-sm text-zinc-100">{title}</CardTitle>
+  1435→          </div>
+  1436→          <Badge variant="outline" className="border-slate-700 bg-slate-950/60 font-mono text-xs text-slate-300">
+  1437→            {loading ? '…' : count}
+  1438→          </Badge>
+  1439→        </div>
+  1440→      </CardHeader>
+  1441→      <CardContent>
+  1442→        <ScrollArea className="h-48 rounded-md">
+  1443→          {loading ? (
+  1444→            <div className="flex h-full items-center justify-center">
+  1445→              <Loader2 className="h-4 w-4 animate-spin text-slate-600" />
+  1446→            </div>
+  1447→          ) : items && items.length > 0 ? (
+  1448→            <div className="flex flex-wrap gap-1.5 pr-2">
+  1449→              {items.map((item) => (
+  1450→                <Badge
+  1451→                  key={item}
+  1452→                  variant="outline"
+  1453→                  className={`border-slate-700 bg-slate-950/60 px-2 py-0.5 font-mono text-[10px] ${a.text}`}
+  1454→                >
+  1455→                  {item}
+  1456→                </Badge>
+  1457→              ))}
+  1458→            </div>
+  1459→          ) : (
+  1460→            <p className="py-8 text-center font-mono text-xs text-slate-500">
+  1461→              No items registered.
+  1462→            </p>
+  1463→          )}
+  1464→        </ScrollArea>
+  1465→      </CardContent>
+  1466→    </Card>
+  1467→  )
+  1468→}
+  1469→
+  1470→function BindingsCard({
+  1471→  bindings,
+  1472→  loading,
+  1473→}: {
+  1474→  bindings?: ArchitectureBinding[]
+  1475→  loading: boolean
+  1476→}) {
+  1477→  const singletonCount = bindings?.filter((b) => b.lifetime === 'singleton').length ?? 0
+  1478→  const transientCount = bindings?.filter((b) => b.lifetime === 'transient').length ?? 0
+  1479→  return (
+  1480→    <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black-20 ring-1 ring-inset ring-slate-800/60">
+  1481→      <CardHeader className="gap-2">
+  1482→        <div className="flex items-center justify-between">
+  1483→          <div className="flex items-center gap-2">
+  1484→            <div className="flex h-7 w-7 items-center justify-center rounded-md border border-emerald-500/30 bg-emerald-500/10">
+  1485→              <Boxes className="h-3.5 w-3.5 text-emerald-400" />
+  1486→            </div>
+  1487→            <CardTitle className="font-mono text-sm text-zinc-100">DI Bindings</CardTitle>
+  1488→          </div>
+  1489→          <Badge variant="outline" className="border-slate-700 bg-slate-950/60 font-mono text-xs text-slate-300">
+  1490→            {loading ? '…' : bindings?.length ?? 0}
+  1491→          </Badge>
+  1492→        </div>
+  1493→      </CardHeader>
+  1494→      <CardContent>
+  1495→        <div className="mb-3 grid grid-cols-2 gap-2">
+  1496→          <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2 font-mono text-xs">
+  1497→            <div className="text-slate-500">Singleton</div>
+  1498→            <div className="text-emerald-300">{singletonCount}</div>
+  1499→          </div>
+  1500→          <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2 font-mono text-xs">
+  1501→            <div className="text-slate-500">Transient</div>
+  1502→            <div className="text-cyan-300">{transientCount}</div>
+  1503→          </div>
+  1504→        </div>
+  1505→        <ScrollArea className="h-36 rounded-md">
+  1506→          {loading ? (
+  1507→            <div className="flex h-full items-center justify-center">
+  1508→              <Loader2 className="h-4 w-4 animate-spin text-slate-600" />
+  1509→            </div>
+  1510→          ) : bindings && bindings.length > 0 ? (
+  1511→            <div className="space-y-1 pr-2">
+  1512→              {bindings.map((b, i) => (
+  1513→                <div
+  1514→                  key={`${b.token}-${i}`}
+  1515→                  className="flex items-center justify-between rounded border border-slate-800 bg-slate-950/40 px-2 py-1"
+  1516→                >
+  1517→                  <span className="truncate font-mono text-[10px] text-slate-300">
+  1518→                    {b.token}
+  1519→                  </span>
+  1520→                  <Badge
+  1521→                    variant="outline"
+  1522→                    className={`ml-2 shrink-0 border-transparent px-1.5 py-0 font-mono text-[9px] ${
+  1523→                      b.lifetime === 'singleton'
+  1524→                        ? 'bg-emerald-500/15 text-emerald-300'
+  1525→                        : 'bg-cyan-500/15 text-cyan-300'
+  1526→                    }`}
+  1527→                  >
+  1528→                    {b.lifetime}
+  1529→                  </Badge>
+  1530→                </div>
+  1531→              ))}
+  1532→            </div>
+  1533→          ) : (
+  1534→            <p className="py-8 text-center font-mono text-xs text-slate-500">
+  1535→              No bindings registered.
+  1536→            </p>
+  1537→          )}
+  1538→        </ScrollArea>
+  1539→      </CardContent>
+  1540→    </Card>
+  1541→  )
+  1542→}
+  1543→
+  1544→// ─── Pipeline Visualization ───────────────────────────────────────────────────
+  1545→
+  1546→function PipelineVisualization() {
+  1547→  return (
+  1548→    <section id="pipelines" className="scroll-mt-8">
+  1549→      <SectionHeading
+  1550→        index="05"
+  1551→        title="Pipeline Visualization"
+  1552→        description="Every command and query flows through a chain of cross-cutting middleware before reaching its handler."
+  1553→        icon={Workflow}
+  1554→      />
+  1555→      <div className="mt-8 grid gap-6 lg:grid-cols-2">
+  1556→        <PipelineCard
+  1557→          title="Command Bus Pipeline"
+  1558→          subtitle="7 middleware stages"
+  1559→          stages={COMMAND_PIPELINE}
+  1560→          accent="emerald"
+  1561→          icon={Send}
+  1562→        />
+  1563→        <PipelineCard
+  1564→          title="Query Bus Pipeline"
+  1565→          subtitle="3 middleware stages"
+  1566→          stages={QUERY_PIPELINE}
+  1567→          accent="cyan"
+  1568→          icon={Search}
+  1569→        />
+  1570→      </div>
+  1571→    </section>
+  1572→  )
+  1573→}
+  1574→
+  1575→function PipelineCard({
+  1576→  title,
+  1577→  subtitle,
+  1578→  stages,
+  1579→  accent,
+  1580→  icon: Icon,
+  1581→}: {
+  1582→  title: string
+  1583→  subtitle: string
+  1584→  stages: string[]
+  1585→  accent: 'emerald' | 'cyan'
+  1586→  icon: React.ComponentType<{ className?: string }>
+  1587→}) {
+  1588→  const a = accentClasses(accent)
+  1589→  return (
+  1590→    <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+  1591→      <CardHeader className="gap-2">
+  1592→        <div className="flex items-center justify-between">
+  1593→          <div className="flex items-center gap-2">
+  1594→            <div className={`flex h-7 w-7 items-center justify-center rounded-md border ${a.bg} ${a.border}`}>
+  1595→              <Icon className={`h-3.5 w-3.5 ${a.text}`} />
+  1596→            </div>
+  1597→            <CardTitle className="font-mono text-sm text-zinc-100">{title}</CardTitle>
+  1598→          </div>
+  1599→          <Badge variant="outline" className="border-slate-700 bg-slate-950/60 font-mono text-[10px] text-slate-400">
+  1600→            {subtitle}
+  1601→          </Badge>
+  1602→        </div>
+  1603→      </CardHeader>
+  1604→      <CardContent>
+  1605→        <div className="flex flex-col gap-2">
+  1606→          {stages.map((stage, idx) => {
+  1607→            const isHandler = stage === 'Handler'
+  1608→            return (
+  1609→              <React.Fragment key={stage}>
+  1610→                <div
+  1611→                  className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${
+  1612→                    isHandler
+  1613→                      ? 'border-emerald-500/40 bg-emerald-500/10'
+  1614→                      : `${a.border} ${a.bg}`
+  1615→                  }`}
+  1616→                >
+  1617→                  <span
+  1618→                    className={`flex h-5 w-5 items-center justify-center rounded font-mono text-[10px] font-bold ${
+  1619→                      isHandler
+  1620→                        ? 'bg-emerald-500/20 text-emerald-300'
+  1621→                        : 'bg-slate-950/60 text-slate-400'
+  1622→                    }`}
+  1623→                  >
+  1624→                    {idx + 1}
+  1625→                  </span>
+  1626→                  <span
+  1627→                    className={`font-mono text-xs ${
+  1628→                      isHandler ? 'font-semibold text-emerald-300' : a.text
+  1629→                    }`}
+  1630→                  >
+  1631→                    {stage}
+  1632→                  </span>
+  1633→                  {isHandler && (
+  1634→                    <Badge
+  1635→                      variant="outline"
+  1636→                      className="ml-auto border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0 font-mono text-[9px] text-emerald-300"
+  1637→                    >
+  1638→                      terminal
+  1639→                    </Badge>
+  1640→                  )}
+  1641→                </div>
+  1642→                {idx < stages.length - 1 && (
+  1643→                  <div className="flex justify-center">
+  1644→                    <ArrowDown className={`h-3 w-3 ${isHandler ? 'text-emerald-500/40' : 'text-slate-700'}`} />
+  1645→                  </div>
+  1646→                )}
+  1647→              </React.Fragment>
+  1648→            )
+  1649→          })}
+  1650→        </div>
+  1651→      </CardContent>
+  1652→    </Card>
+  1653→  )
+  1654→}
+  1655→
+  1656→// ─── Section Heading ──────────────────────────────────────────────────────────
+  1657→
+  1658→function SectionHeading({
+  1659→  index,
+  1660→  title,
+  1661→  description,
+  1662→  icon: Icon,
+  1663→  action,
+  1664→}: {
+  1665→  index: string
+  1666→  title: string
+  1667→  description: string
+  1668→  icon: React.ComponentType<{ className?: string }>
+  1669→  action?: React.ReactNode
+  1670→}) {
+  1671→  return (
+  1672→    <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+  1673→      <div className="flex flex-col gap-3">
+  1674→        <div className="flex items-center gap-3">
+  1675→          <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 ring-1 ring-inset ring-emerald-500/20">
+  1676→            <Icon className="h-4 w-4 text-emerald-400" />
+  1677→          </div>
+  1678→          <div className="flex items-baseline gap-2">
+  1679→            <span className="font-mono text-xs text-slate-600">{index}</span>
+  1680→            <h2 className="font-mono text-2xl font-semibold tracking-tight text-zinc-50">
+  1681→              {title}
+  1682→            </h2>
+  1683→          </div>
+  1684→        </div>
+  1685→        <p className="max-w-2xl text-sm text-slate-400">{description}</p>
+  1686→      </div>
+  1687→      {action && <div className="shrink-0">{action}</div>}
+  1688→    </div>
+  1689→  )
+  1690→}
+  1691→
+  1692→// ─── Footer ───────────────────────────────────────────────────────────────────
+  1693→
+  1694→function Footer() {
+  1695→  return (
+  1696→    <footer className="mt-auto border-t border-slate-800/80 bg-slate-950/80 backdrop-blur-sm">
+  1697→      <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
+  1698→        <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+  1699→          <div className="space-y-2">
+  1700→            <div className="flex items-center gap-2 font-mono text-sm text-zinc-100">
+  1701→              <span className="text-emerald-400">Play</span>
+  1702→              <span>Liquid</span>
+  1703→              <span className="text-slate-600">·</span>
+  1704→              <span className="text-slate-400">Architecture Foundation</span>
+  1705→            </div>
+  1706→            <p className="font-mono text-xs text-slate-500">
+  1707→              Milestone 1 — Production-grade event-driven platform.
+  1708→            </p>
+  1709→          </div>
+  1710→          <div className="flex flex-col gap-2">
+  1711→            <p className="font-mono text-[10px] uppercase tracking-widest text-slate-600">
+  1712→              Infrastructure Endpoints
+  1713→            </p>
+  1714→            <div className="flex flex-wrap gap-2">
+  1715→              <FooterLink href="/api/health" label="/api/health" icon={Activity} />
+  1716→              <FooterLink href="/api/health/extended" label="/api/health/extended" icon={ShieldAlert} />
+  1717→              <FooterLink href="/api/ready" label="/api/ready" icon={CheckCircle2} />
+  1718→              <FooterLink href="/api/live" label="/api/live" icon={Zap} />
+  1719→              <FooterLink href="/api/metrics" label="/api/metrics" icon={BarChart3} />
+  1720→              <FooterLink href="/api/workers/health" label="/api/workers/health" icon={Workflow} />
+  1721→              <FooterLink href="/api/feature-flags" label="/api/feature-flags" icon={Flag} />
+  1722→            </div>
+  1723→          </div>
+  1724→        </div>
+  1725→        <Separator className="bg-slate-800" />
+  1726→        <div className="flex flex-col items-center justify-between gap-2 font-mono text-[10px] text-slate-600 sm:flex-row">
+  1727→          <span>
+  1728→            Milestone 2 · Caching · Messaging · Workers · Storage · Notifications · Operations
+  1729→          </span>
+  1730→          <span className="flex items-center gap-1.5">
+  1731→            <Cloud className="h-3 w-3" />
+  1732→            Next.js · TypeScript · Prisma · Redis · shadcn/ui
+  1733→          </span>
+  1734→        </div>
+  1735→      </div>
+  1736→    </footer>
+  1737→  )
+  1738→}
+  1739→
+  1740→function FooterLink({
+  1741→  href,
+  1742→  label,
+  1743→  icon: Icon,
+  1744→}: {
+  1745→  href: string
+  1746→  label: string
+  1747→  icon: React.ComponentType<{ className?: string }>
+  1748→}) {
+  1749→  return (
+  1750→    <a
+  1751→      href={href}
+  1752→      className="inline-flex items-center gap-1.5 rounded-md border border-slate-800 bg-slate-900/60 px-2.5 py-1 font-mono text-[11px] text-slate-400 transition-colors hover:border-emerald-500/40 hover:bg-emerald-500/10 hover:text-emerald-300"
+  1753→    >
+  1754→      <Icon className="h-3 w-3" />
+  1755→      {label}
+  1756→    </a>
+  1757→  )
+  1758→}
+  1759→
+  1760→// ─── M2 Section Banner ───────────────────────────────────────────────────────
+  1761→
+  1762→function M2SectionBanner() {
+  1763→  return (
+  1764→    <div className="mt-16 flex flex-col items-start gap-6 rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/5 via-slate-900/40 to-cyan-500/5 p-6 ring-1 ring-inset ring-emerald-500/10 lg:flex-row lg:items-center lg:justify-between">
+  1765→      <div className="flex items-start gap-4">
+  1766→        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-emerald-500/40 bg-emerald-500/10 ring-1 ring-inset ring-emerald-500/20">
+  1767→          <Server className="h-6 w-6 text-emerald-400" />
+  1768→        </div>
+  1769→        <div className="space-y-1">
+  1770→          <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.25em] text-emerald-400/80">
+  1771→            <span>milestone 2</span>
+  1772→            <span className="text-slate-600">·</span>
+  1773→            <span className="text-slate-400">production infrastructure</span>
+  1774→          </div>
+  1775→          <h2 className="font-mono text-2xl font-bold tracking-tight text-zinc-50 sm:text-3xl">
+  1776→            Platform Services & Operations
+  1777→          </h2>
+  1778→          <p className="max-w-2xl text-sm text-slate-400">
+  1779→            Caching, messaging, storage, notifications, and full production
+  1780→            operations — extended health probes, Prometheus metrics, worker
+  1781→            monitoring, feature flags, backups, and disaster recovery.
+  1782→          </p>
+  1783→        </div>
+  1784→      </div>
+  1785→      <div className="flex flex-wrap items-center gap-2 font-mono text-[10px]">
+  1786→        <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
+  1787→          Redis
+  1788→        </Badge>
+  1789→        <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-300">
+  1790→          Workers
+  1791→        </Badge>
+  1792→        <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
+  1793→          Metrics
+  1794→        </Badge>
+  1795→        <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-300">
+  1796→          Feature Flags
+  1797→        </Badge>
+  1798→        <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
+  1799→          DR & Backups
+  1800→        </Badge>
+  1801→      </div>
+  1802→    </div>
+  1803→  )
+  1804→}
+  1805→
+  1806→// ─── Platform Services Grid ──────────────────────────────────────────────────
+  1807→
+  1808→function PlatformServicesGrid() {
+  1809→  return (
+  1810→    <section id="m2-platform" className="scroll-mt-8">
+  1811→      <SectionHeading
+  1812→        index="06"
+  1813→        title="Platform Services"
+  1814→        description="Every M2 infrastructure framework, grouped by domain. Each card maps to a production-ready provider with in-memory and external backends."
+  1815→        icon={Layers}
+  1816→      />
+  1817→      <div className="mt-8 space-y-8">
+  1818→        {PLATFORM_SERVICE_GROUPS.map((group) => {
+  1819→          const GroupIcon = group.icon
+  1820→          const accent = accentClasses(group.accent)
+  1821→          return (
+  1822→            <div key={group.name} className="space-y-3">
+  1823→              <div className="flex items-center gap-2">
+  1824→                <div
+  1825→                  className={`flex h-7 w-7 items-center justify-center rounded-md border ${accent.bg} ${accent.border} ring-1 ring-inset ${accent.ring}`}
+  1826→                >
+  1827→                  <GroupIcon className={`h-3.5 w-3.5 ${accent.text}`} />
+  1828→                </div>
+  1829→                <h3 className="font-mono text-sm font-semibold uppercase tracking-wider text-zinc-200">
+  1830→                  {group.name}
+  1831→                </h3>
+  1832→                <Badge
+  1833→                  variant="outline"
+  1834→                  className="border-slate-700 bg-slate-950/60 font-mono text-[10px] text-slate-400"
+  1835→                >
+  1836→                  {group.services.length}
+  1837→                </Badge>
+  1838→                <div className="ml-2 h-px flex-1 bg-gradient-to-r from-slate-800 to-transparent" />
+  1839→              </div>
+  1840→              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+  1841→                {group.services.map((service) => {
+  1842→                  const ServiceIcon = service.icon
+  1843→                  return (
+  1844→                    <Card
+  1845→                      key={service.name}
+  1846→                      className="border-slate-800 bg-slate-900/40 py-4 ring-1 ring-inset ring-slate-800/40 transition-colors hover:border-slate-700 hover:bg-slate-900/60"
+  1847→                    >
+  1848→                      <CardContent className="space-y-2 px-4">
+  1849→                        <div className="flex items-center gap-2">
+  1850→                          <div
+  1851→                            className={`flex h-7 w-7 items-center justify-center rounded-md border ${accent.bg} ${accent.border}`}
+  1852→                          >
+  1853→                            <ServiceIcon className={`h-3.5 w-3.5 ${accent.text}`} />
+  1854→                          </div>
+  1855→                          <span className="font-mono text-xs font-semibold text-zinc-100">
+  1856→                            {service.name}
+  1857→                          </span>
+  1858→                        </div>
+  1859→                        <p className="font-mono text-[10px] leading-relaxed text-slate-400">
+  1860→                          {service.description}
+  1861→                        </p>
+  1862→                      </CardContent>
+  1863→                    </Card>
+  1864→                  )
+  1865→                })}
+  1866→              </div>
+  1867→            </div>
+  1868→          )
+  1869→        })}
+  1870→      </div>
+  1871→    </section>
+  1872→  )
+  1873→}
+  1874→
+  1875→// ─── Extended Health Dashboard ───────────────────────────────────────────────
+  1876→
+  1877→function ExtendedHealthDashboard() {
+  1878→  const { toast } = useToast()
+  1879→  const [health, setHealth] = React.useState<HealthResponse | null>(null)
+  1880→  const [error, setError] = React.useState<string | null>(null)
+  1881→  const [loading, setLoading] = React.useState(true)
+  1882→  const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null)
+  1883→  const [paused, setPaused] = React.useState(false)
+  1884→
+  1885→  const fetchHealth = React.useCallback(async () => {
+  1886→    try {
+  1887→      const res = await fetch('/api/health/extended', { cache: 'no-store' })
+  1888→      if (!res.ok) {
+  1889→        throw new Error(`HTTP ${res.status}`)
+  1890→      }
+  1891→      const data = (await res.json()) as HealthResponse
+  1892→      setHealth(data)
+  1893→      setError(null)
+  1894→      setLastUpdated(new Date())
+  1895→    } catch (e) {
+  1896→      const msg = e instanceof Error ? e.message : 'Failed to fetch extended health'
+  1897→      setError(msg)
+  1898→    } finally {
+  1899→      setLoading(false)
+  1900→    }
+  1901→  }, [])
+  1902→
+  1903→  React.useEffect(() => {
+  1904→    void fetchHealth()
+  1905→    if (paused) return
+  1906→    const interval = setInterval(() => void fetchHealth(), 5000)
+  1907→    return () => clearInterval(interval)
+  1908→  }, [fetchHealth, paused])
+  1909→
+  1910→  const overall = health?.status ?? 'unhealthy'
+  1911→
+  1912→  const handleRefresh = () => {
+  1913→    setLoading(true)
+  1914→    void fetchHealth()
+  1915→    toast({
+  1916→      title: 'Extended health refreshed',
+  1917→      description: 'Re-ran all 13 infrastructure health checks in parallel.',
+  1918→    })
+  1919→  }
+  1920→
+  1921→  const counts = React.useMemo(() => {
+  1922→    const checks = health?.checks ?? []
+  1923→    return {
+  1924→      healthy: checks.filter((c) => c.status === 'healthy').length,
+  1925→      degraded: checks.filter((c) => c.status === 'degraded').length,
+  1926→      unhealthy: checks.filter((c) => c.status === 'unhealthy').length,
+  1927→    }
+  1928→  }, [health])
+  1929→
+  1930→  return (
+  1931→    <section id="health-extended" className="scroll-mt-8">
+  1932→      <SectionHeading
+  1933→        index="07"
+  1934→        title="Extended Health Dashboard"
+  1935→        description="All 13 production infrastructure checks — database, Redis, event bus, outbox, projections, workers, cache, rate limiter, circuit breakers, and more. Parallel, TTL-cached, auto-refreshing."
+  1936→        icon={ShieldAlert}
+  1937→        action={
+  1938→          <div className="flex items-center gap-2">
+  1939→            <Button
+  1940→              variant="outline"
+  1941→              size="sm"
+  1942→              onClick={() => setPaused((p) => !p)}
+  1943→              className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-300 hover:bg-slate-800 hover:text-zinc-100"
+  1944→            >
+  1945→              {paused ? 'Resume' : 'Pause'}
+  1946→            </Button>
+  1947→            <Button
+  1948→              variant="outline"
+  1949→              size="sm"
+  1950→              onClick={handleRefresh}
+  1951→              disabled={loading}
+  1952→              className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-300 hover:bg-slate-800 hover:text-zinc-100"
+  1953→            >
+  1954→              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+  1955→              Refresh
+  1956→            </Button>
+  1957→          </div>
+  1958→        }
+  1959→      />
+  1960→
+  1961→      <div className="mt-8 grid gap-4 lg:grid-cols-[1.2fr_2fr]">
+  1962→        {/* Overall status */}
+  1963→        <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+  1964→          <CardHeader>
+  1965→            <div className="flex items-center justify-between">
+  1966→              <CardTitle className="font-mono text-sm uppercase tracking-wider text-slate-300">
+  1967→                Overall Status
+  1968→              </CardTitle>
+  1969→              <StatusDot status={overall} />
+  1970→            </div>
+  1971→            <CardDescription className="text-xs">
+  1972→              Aggregated from all registered extended health checks.
+  1973→            </CardDescription>
+  1974→          </CardHeader>
+  1975→          <CardContent className="space-y-4">
+  1976→            <div className={`rounded-lg border px-4 py-3 ${statusColor(overall)}`}>
+  1977→              <div className="flex items-center justify-between">
+  1978→                <span className="font-mono text-2xl font-bold uppercase">
+  1979→                  {loading && !health ? '...' : overall}
+  1980→                </span>
+  1981→                <ShieldAlert className="h-5 w-5 opacity-70" />
+  1982→              </div>
+  1983→            </div>
+  1984→            <div className="grid grid-cols-3 gap-2 font-mono text-xs">
+  1985→              <div className="rounded-md border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
+  1986→                <div className="text-slate-500">Healthy</div>
+  1987→                <div className="text-emerald-300">{counts.healthy}</div>
+  1988→              </div>
+  1989→              <div className="rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2">
+  1990→                <div className="text-slate-500">Degraded</div>
+  1991→                <div className="text-amber-300">{counts.degraded}</div>
+  1992→              </div>
+  1993→              <div className="rounded-md border border-rose-500/20 bg-rose-500/5 px-3 py-2">
+  1994→                <div className="text-slate-500">Unhealthy</div>
+  1995→                <div className="text-rose-300">{counts.unhealthy}</div>
+  1996→              </div>
+  1997→            </div>
+  1998→            <div className="grid grid-cols-2 gap-2 font-mono text-xs">
+  1999→              <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2">
+  2000→                <div className="text-slate-500">Checks</div>
+  2001→                <div className="text-zinc-200">{health?.checks.length ?? 0}</div>
+  2002→              </div>
+  2003→              <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2">
+  2004→                <div className="text-slate-500">Last Updated</div>
+  2005→                <div className="text-zinc-200">
+  2006→                  {lastUpdated ? lastUpdated.toLocaleTimeString() : '—'}
+  2007→                </div>
+  2008→              </div>
+  2009→            </div>
+  2010→            {error && (
+  2011→              <div className="flex items-start gap-2 rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+  2012→                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+  2013→                <span className="font-mono">{error}</span>
+  2014→              </div>
+  2015→            )}
+  2016→          </CardContent>
+  2017→        </Card>
+  2018→
+  2019→        {/* Per-component grid */}
+  2020→        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+  2021→          {loading && !health ? (
+  2022→            <ExtendedHealthSkeletons />
+  2023→          ) : health && health.checks.length > 0 ? (
+  2024→            health.checks.map((check) => (
+  2025→              <ExtendedHealthCheckCard key={check.name} check={check} />
+  2026→            ))
+  2027→          ) : (
+  2028→            <div className="col-span-full flex items-center justify-center rounded-lg border border-dashed border-slate-800 py-12 text-sm text-slate-500">
+  2029→              No extended health checks registered.
+  2030→            </div>
+  2031→          )}
+  2032→        </div>
+  2033→      </div>
+  2034→    </section>
+  2035→  )
+  2036→}
+  2037→
+  2038→function ExtendedHealthCheckCard({ check }: { check: HealthCheck }) {
+  2039→  const Icon = COMPONENT_ICONS[check.name] ?? Server
+  2040→  return (
+  2041→    <Card className="border-slate-800 bg-slate-900/40 py-3 ring-1 ring-inset ring-slate-800/40">
+  2042→      <CardContent className="space-y-2 px-3 py-1">
+  2043→        <div className="flex items-center justify-between gap-2">
+  2044→          <div className="flex items-center gap-2">
+  2045→            <div className="flex h-6 w-6 items-center justify-center rounded-md border border-slate-700 bg-slate-950/60">
+  2046→              <Icon className="h-3 w-3 text-slate-300" />
+  2047→            </div>
+  2048→            <span className="font-mono text-xs text-zinc-100">{check.name}</span>
+  2049→          </div>
+  2050→          <span
+  2051→            className={`rounded border px-1.5 py-0.5 font-mono text-[9px] uppercase ${statusColor(check.status)}`}
+  2052→          >
+  2053→            {check.status}
+  2054→          </span>
+  2055→        </div>
+  2056→        <div className="flex items-center justify-between font-mono text-[10px]">
+  2057→          <span className="text-slate-500">latency</span>
+  2058→          <span className="text-cyan-300">{check.latencyMs} ms</span>
+  2059→        </div>
+  2060→      </CardContent>
+  2061→    </Card>
+  2062→  )
+  2063→}
+  2064→
+  2065→function ExtendedHealthSkeletons() {
+  2066→  return (
+  2067→    <>
+  2068→      {Array.from({ length: 12 }).map((_, i) => (
+  2069→        <Card
+  2070→          key={i}
+  2071→          className="border-slate-800 bg-slate-900/40 py-3 ring-1 ring-inset ring-slate-800/40"
+  2072→        >
+  2073→          <CardContent className="flex items-center gap-2 px-3 py-1">
+  2074→            <Loader2 className="h-3 w-3 animate-spin text-emerald-400/60" />
+  2075→            <span className="font-mono text-[10px] text-slate-500">Loading…</span>
+  2076→          </CardContent>
+  2077→        </Card>
+  2078→      ))}
+  2079→    </>
+  2080→  )
+  2081→}
+  2082→
+  2083→// ─── Worker Health Monitor ───────────────────────────────────────────────────
+  2084→
+  2085→function WorkerHealthMonitor() {
+  2086→  const [data, setData] = React.useState<WorkerHealthResponse | null>(null)
+  2087→  const [error, setError] = React.useState<string | null>(null)
+  2088→  const [loading, setLoading] = React.useState(true)
+  2089→  const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null)
+  2090→  const [paused, setPaused] = React.useState(false)
+  2091→
+  2092→  const fetchWorkers = React.useCallback(async () => {
+  2093→    try {
+  2094→      const res = await fetch('/api/workers/health', { cache: 'no-store' })
+  2095→      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  2096→      const json = (await res.json()) as WorkerHealthResponse
+  2097→      setData(json)
+  2098→      setError(null)
+  2099→      setLastUpdated(new Date())
+  2100→    } catch (e) {
+  2101→      setError(e instanceof Error ? e.message : 'Failed to fetch worker health')
+  2102→    } finally {
+  2103→      setLoading(false)
+  2104→    }
+  2105→  }, [])
+  2106→
+  2107→  React.useEffect(() => {
+  2108→    void fetchWorkers()
+  2109→    if (paused) return
+  2110→    const interval = setInterval(() => void fetchWorkers(), 5000)
+  2111→    return () => clearInterval(interval)
+  2112→  }, [fetchWorkers, paused])
+  2113→
+  2114→  const workers = data?.workers ?? []
+  2115→
+  2116→  return (
+  2117→    <section id="workers" className="scroll-mt-8">
+  2118→      <SectionHeading
+  2119→        index="08"
+  2120→        title="Worker Health Monitor"
+  2121→        description="Outbox, Projection, Cleanup, and Analytics workers — running status, throughput, error rates, and average durations. Auto-refreshes every 5 seconds."
+  2122→        icon={Workflow}
+  2123→        action={
+  2124→          <div className="flex items-center gap-2">
+  2125→            <span className="hidden font-mono text-[10px] text-slate-500 sm:inline">
+  2126→              {lastUpdated ? `updated ${lastUpdated.toLocaleTimeString()}` : ''}
+  2127→            </span>
+  2128→            <Button
+  2129→              variant="outline"
+  2130→              size="sm"
+  2131→              onClick={() => setPaused((p) => !p)}
+  2132→              className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-300 hover:bg-slate-800 hover:text-zinc-100"
+  2133→            >
+  2134→              {paused ? 'Resume' : 'Pause'}
+  2135→            </Button>
+  2136→            <Button
+  2137→              variant="outline"
+  2138→              size="sm"
+  2139→              onClick={() => {
+  2140→                setLoading(true)
+  2141→                void fetchWorkers()
+  2142→              }}
+  2143→              disabled={loading}
+  2144→              className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-300 hover:bg-slate-800 hover:text-zinc-100"
+  2145→            >
+  2146→              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+  2147→              Refresh
+  2148→            </Button>
+  2149→          </div>
+  2150→        }
+  2151→      />
+  2152→
+  2153→      {error ? (
+  2154→        <div className="mt-6 flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+  2155→          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+  2156→          <span className="font-mono">{error}</span>
+  2157→        </div>
+  2158→      ) : loading && !data ? (
+  2159→        <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+  2160→          {Array.from({ length: 4 }).map((_, i) => (
+  2161→            <Card key={i} className="border-slate-800 bg-slate-900/40 py-4 ring-1 ring-inset ring-slate-800/40">
+  2162→              <CardContent className="flex items-center gap-2 px-4">
+  2163→                <Loader2 className="h-4 w-4 animate-spin text-emerald-400/60" />
+  2164→                <span className="font-mono text-xs text-slate-500">Loading…</span>
+  2165→              </CardContent>
+  2166→            </Card>
+  2167→          ))}
+  2168→        </div>
+  2169→      ) : workers.length === 0 ? (
+  2170→        <div className="mt-8 flex items-center justify-center rounded-lg border border-dashed border-slate-800 py-12 text-sm text-slate-500">
+  2171→          No workers registered.
+  2172→        </div>
+  2173→      ) : (
+  2174→        <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+  2175→          {workers.map((worker) => (
+  2176→            <WorkerCard key={worker.name} worker={worker} />
+  2177→          ))}
+  2178→        </div>
+  2179→      )}
+  2180→    </section>
+  2181→  )
+  2182→}
+  2183→
+  2184→function WorkerCard({ worker }: { worker: WorkerHealth }) {
+  2185→  return (
+  2186→    <Card className="border-slate-800 bg-slate-900/50 py-4 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+  2187→      <CardHeader className="gap-2 px-4">
+  2188→        <div className="flex items-center justify-between gap-2">
+  2189→          <div className="flex items-center gap-2">
+  2190→            <span
+  2191→              className={`relative flex h-2.5 w-2.5 ${worker.running ? '' : 'opacity-50'}`}
+  2192→            >
+  2193→              {worker.running && (
+  2194→                <span
+  2195→                  className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 bg-emerald-400"
+  2196→                />
+  2197→              )}
+  2198→              <span
+  2199→                className={`relative inline-flex h-2.5 w-2.5 rounded-full ${
+  2200→                  worker.running ? 'bg-emerald-400' : 'bg-slate-600'
+  2201→                }`}
+  2202→              />
+  2203→            </span>
+  2204→            <CardTitle className="font-mono text-xs text-zinc-100">
+  2205→              {worker.name}
+  2206→            </CardTitle>
+  2207→          </div>
+  2208→          <Badge
+  2209→            variant="outline"
+  2210→            className={
+  2211→              worker.running
+  2212→                ? 'border-emerald-500/30 bg-emerald-500/10 font-mono text-[9px] uppercase text-emerald-300'
+  2213→                : 'border-slate-700 bg-slate-900/60 font-mono text-[9px] uppercase text-slate-400'
+  2214→            }
+  2215→          >
+  2216→            {worker.running ? 'running' : 'stopped'}
+  2217→          </Badge>
+  2218→        </div>
+  2219→      </CardHeader>
+  2220→      <CardContent className="space-y-3 px-4">
+  2221→        <div className="grid grid-cols-2 gap-2 font-mono text-xs">
+  2222→          <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2">
+  2223→            <div className="text-slate-500">Processed</div>
+  2224→            <div className="text-emerald-300">{worker.totalProcessed}</div>
+  2225→          </div>
+  2226→          <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2">
+  2227→            <div className="text-slate-500">Errors</div>
+  2228→            <div
+  2229→              className={
+  2230→                worker.totalErrors > 0 ? 'text-rose-300' : 'text-slate-300'
+  2231→              }
+  2232→            >
+  2233→              {worker.totalErrors}
+  2234→            </div>
+  2235→          </div>
+  2236→          <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2">
+  2237→            <div className="text-slate-500">Avg Duration</div>
+  2238→            <div className="text-cyan-300">
+  2239→              {worker.avgDurationMs.toFixed(1)} ms
+  2240→            </div>
+  2241→          </div>
+  2242→          <div className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2">
+  2243→            <div className="text-slate-500">Last Run</div>
+  2244→            <div className="text-zinc-200">
+  2245→              {worker.lastRunAt
+  2246→                ? new Date(worker.lastRunAt).toLocaleTimeString()
+  2247→                : '—'}
+  2248→            </div>
+  2249→          </div>
+  2250→        </div>
+  2251→        {worker.lastError && (
+  2252→          <div className="rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2">
+  2253→            <div className="flex items-center gap-2 font-mono text-[10px] text-rose-300">
+  2254→              <AlertCircle className="h-3 w-3" />
+  2255→              Last Error
+  2256→            </div>
+  2257→            <p className="mt-1 truncate font-mono text-[10px] text-rose-300/80">
+  2258→              {worker.lastError}
+  2259→            </p>
+  2260→          </div>
+  2261→        )}
+  2262→      </CardContent>
+  2263→    </Card>
+  2264→  )
+  2265→}
+  2266→
+  2267→// ─── Prometheus Metrics Preview ──────────────────────────────────────────────
+  2268→
+  2269→function PrometheusMetrics() {
+  2270→  const [metrics, setMetrics] = React.useState<string>('')
+  2271→  const [error, setError] = React.useState<string | null>(null)
+  2272→  const [loading, setLoading] = React.useState(true)
+  2273→  const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null)
+  2274→  const [paused, setPaused] = React.useState(false)
+  2275→  const [expanded, setExpanded] = React.useState(false)
+  2276→
+  2277→  const fetchMetrics = React.useCallback(async () => {
+  2278→    try {
+  2279→      const res = await fetch('/api/metrics', { cache: 'no-store' })
+  2280→      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  2281→      const text = await res.text()
+  2282→      setMetrics(text)
+  2283→      setError(null)
+  2284→      setLastUpdated(new Date())
+  2285→    } catch (e) {
+  2286→      setError(e instanceof Error ? e.message : 'Failed to fetch metrics')
+  2287→    } finally {
+  2288→      setLoading(false)
+  2289→    }
+  2290→  }, [])
+  2291→
+  2292→  React.useEffect(() => {
+  2293→    void fetchMetrics()
+  2294→    if (paused) return
+  2295→    const interval = setInterval(() => void fetchMetrics(), 10000)
+  2296→    return () => clearInterval(interval)
+  2297→  }, [fetchMetrics, paused])
+  2298→
+  2299→  const lines = React.useMemo(() => metrics.split('\n'), [metrics])
+  2300→  const previewLines = expanded ? lines : lines.slice(0, 50)
+  2301→  const totalLines = lines.length
+  2302→
+  2303→  // Extract the latest numeric value for each key metric (ignoring HELP/TYPE lines).
+  2304→  const keyMetricValues = React.useMemo(() => {
+  2305→    const out: Array<{ name: string; value: string | null }> = []
+  2306→    for (const name of KEY_METRIC_NAMES) {
+  2307→      const match = lines.find(
+  2308→        (l) => l.startsWith(name + ' ') || l.startsWith(name + '{'),
+  2309→      )
+  2310→      if (match) {
+  2311→        const valuePart = match.split(' ').pop() ?? null
+  2312→        out.push({ name, value: valuePart })
+  2313→      } else {
+  2314→        out.push({ name, value: null })
+  2315→      }
+  2316→    }
+  2317→    return out
+  2318→  }, [lines])
+  2319→
+  2320→  return (
+  2321→    <section id="metrics" className="scroll-mt-8">
+  2322→      <SectionHeading
+  2323→        index="09"
+  2324→        title="Prometheus Metrics"
+  2325→        description="Live Prometheus-compatible metrics from the MetricsFramework — counters, gauges, and histograms for every subsystem. Updates every 10 seconds."
+  2326→        icon={BarChart3}
+  2327→        action={
+  2328→          <div className="flex items-center gap-2">
+  2329→            <span className="hidden font-mono text-[10px] text-slate-500 sm:inline">
+  2330→              {lastUpdated ? `updated ${lastUpdated.toLocaleTimeString()}` : ''}
+  2331→            </span>
+  2332→            <Button
+  2333→              variant="outline"
+  2334→              size="sm"
+  2335→              onClick={() => setPaused((p) => !p)}
+  2336→              className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-300 hover:bg-slate-800 hover:text-zinc-100"
+  2337→            >
+  2338→              {paused ? 'Resume' : 'Pause'}
+  2339→            </Button>
+  2340→            <Button
+  2341→              variant="outline"
+  2342→              size="sm"
+  2343→              onClick={() => {
+  2344→                setLoading(true)
+  2345→                void fetchMetrics()
+  2346→              }}
+  2347→              disabled={loading}
+  2348→              className="border-slate-700 bg-slate-900/60 font-mono text-xs text-slate-300 hover:bg-slate-800 hover:text-zinc-100"
+  2349→            >
+  2350→              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+  2351→              Refresh
+  2352→            </Button>
+  2353→          </div>
+  2354→        }
+  2355→      />
+  2356→
+  2357→      <div className="mt-8 grid gap-4 lg:grid-cols-[1fr_2fr]">
+  2358→        {/* Key metrics summary */}
+  2359→        <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+  2360→          <CardHeader className="gap-2">
+  2361→            <div className="flex items-center justify-between">
+  2362→              <div className="flex items-center gap-2">
+  2363→                <div className="flex h-7 w-7 items-center justify-center rounded-md border border-emerald-500/30 bg-emerald-500/10">
+  2364→                  <Gauge className="h-3.5 w-3.5 text-emerald-400" />
+  2365→                </div>
+  2366→                <CardTitle className="font-mono text-sm text-zinc-100">
+  2367→                  Key Metrics
+  2368→                </CardTitle>
+  2369→              </div>
+  2370→              <Badge
+  2371→                variant="outline"
+  2372→                className="border-slate-700 bg-slate-950/60 font-mono text-[10px] text-slate-400"
+  2373→              >
+  2374→                {totalLines} lines
+  2375→              </Badge>
+  2376→            </div>
+  2377→            <CardDescription className="text-xs">
+  2378→              Latest values for the most-watched platform metrics.
+  2379→            </CardDescription>
+  2380→          </CardHeader>
+  2381→          <CardContent className="space-y-2">
+  2382→            {keyMetricValues.map(({ name, value }) => (
+  2383→              <div
+  2384→                key={name}
+  2385→                className="flex items-center justify-between rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2"
+  2386→              >
+  2387→                <span className="font-mono text-[10px] text-slate-400">
+  2388→                  {name}
+  2389→                </span>
+  2390→                <span
+  2391→                  className={`font-mono text-xs ${
+  2392→                    value === null ? 'text-slate-600' : 'text-emerald-300'
+  2393→                  }`}
+  2394→                >
+  2395→                  {value ?? '—'}
+  2396→                </span>
+  2397→              </div>
+  2398→            ))}
+  2399→            {error && (
+  2400→              <div className="mt-2 flex items-start gap-2 rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+  2401→                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+  2402→                <span className="font-mono">{error}</span>
+  2403→              </div>
+  2404→            )}
+  2405→            <a
+  2406→              href="/api/metrics"
+  2407→              target="_blank"
+  2408→              rel="noreferrer"
+  2409→              className="mt-2 inline-flex items-center gap-1.5 font-mono text-[10px] text-cyan-300 hover:text-cyan-200"
+  2410→            >
+  2411→              <ExternalLink className="h-3 w-3" />
+  2412→              Open raw /api/metrics
+  2413→            </a>
+  2414→          </CardContent>
+  2415→        </Card>
+  2416→
+  2417→        {/* Raw metrics preview */}
+  2418→        <Card className="border-slate-800 bg-slate-900/50 shadow-lg shadow-black/20 ring-1 ring-inset ring-slate-800/60">
+
+[showing lines 419-2418 of 2989; use offset=2419 with limit to continue reading]

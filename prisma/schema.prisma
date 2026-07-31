@@ -100,8 +100,8 @@ model IdempotencyRecord {
 model UserReadModel {
   id          String   @id @default(cuid())
   userId      String   @unique
-  email       String
-  username    String
+  email       String   @unique
+  username    String   @unique
   displayName String   @default("")
   country     String   @default("")
   timezone    String   @default("UTC")
@@ -109,6 +109,10 @@ model UserReadModel {
   status      String   @default("waitlist")
   emailVerified Boolean @default(false)
   mfaEnabled  Boolean  @default(false)
+  passwordHash String?
+  roles       String   @default("[]")
+  isDemo      Boolean  @default(false)
+  isPermanent Boolean  @default(false)
   createdAt   String
   updatedAt   DateTime @updatedAt
 
@@ -375,7 +379,7 @@ model Device {
 }
 
 model WaitlistEntry {
-  id                String   @id
+  id                String   @id @default(cuid())
   email             String   @unique
   username          String
   status            String   @default("pending")

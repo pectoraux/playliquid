@@ -14,22 +14,22 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PlayLiquid — Production Architecture Foundation",
-  description: "Event-driven gaming platform built with DDD, CQRS, Event Sourcing, and the Outbox pattern.",
-  keywords: ["PlayLiquid", "DDD", "CQRS", "Event Sourcing", "Outbox", "Next.js", "TypeScript"],
+  title: "PlayLiquid — Play. Create. Earn.",
+  description: "The all-in-one platform where players discover games, creators build worlds, and everyone gets rewarded.",
+  keywords: ["PlayLiquid", "gaming platform", "play games", "create games", "earn rewards"],
   authors: [{ name: "PlayLiquid" }],
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
   },
   openGraph: {
-    title: "PlayLiquid Architecture Foundation",
-    description: "Production-grade event-driven architecture",
+    title: "PlayLiquid — Play. Create. Earn.",
+    description: "The all-in-one platform where players discover games, creators build worlds, and everyone gets rewarded.",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "PlayLiquid Architecture Foundation",
-    description: "Production-grade event-driven architecture",
+    title: "PlayLiquid — Play. Create. Earn.",
+    description: "The all-in-one platform where players discover games, creators build worlds, and everyone gets rewarded.",
   },
 };
 
