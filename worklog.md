@@ -976,3 +976,36 @@ Stage Summary:
 - Full customer experience verified for Player, Creator, and Admin roles
 - Every navigation link in the sidebar resolves to a real page with demo data
 - No broken links, no 404s, no client-side errors
+
+---
+Task ID: DEPLOY
+Agent: main
+Task: Push to GitHub and deploy to Vercel with Neon PostgreSQL
+
+Work Log:
+- Switched Prisma datasource from SQLite to PostgreSQL
+- Updated .env to use Neon pooled connection string
+- Installed dotenv for explicit .env loading in Prisma client
+- Fixed system env var override (DATABASE_URL was set to old SQLite path at system level)
+- Pushed schema to Neon PostgreSQL database (all 30+ tables created)
+- Seeded Neon database with admin + 9 demo accounts
+- Fixed auth-handlers.ts to use shared db client (import { db as prisma } from '@/lib/db')
+- Removed Turso/libSQL adapter (not needed for standard PostgreSQL)
+- Pushed project to GitHub: https://github.com/pectoraux/playliquid
+- Set Vercel environment variables: DATABASE_URL (Neon), AUTH_SECRET
+- Deployed to Vercel production: https://my-project-dun-theta.vercel.app
+- Verified production deployment:
+  - /api/live → 200
+  - / → 200 (welcome page)
+  - /signin → 200
+  - /api/auth/v2/demo-accounts → 200 (returns demo accounts)
+  - Player demo login → success (returns session)
+  - Admin login (ekontetevi@gmail / Payswap123456) → success (returns session)
+
+Stage Summary:
+- GitHub repo: https://github.com/pectoraux/playliquid
+- Vercel deployment: https://my-project-dun-theta.vercel.app
+- Database: Neon PostgreSQL (pooled connection)
+- All 372 source files deployed
+- Lint: 0 errors, Architecture: 0 violations
+- Production login verified for both admin and demo accounts
