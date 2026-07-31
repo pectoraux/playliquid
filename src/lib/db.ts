@@ -17,17 +17,18 @@
 import { PrismaClient } from '@prisma/client';
 import { PrismaLibSQL } from '@prisma/adapter-libsql';
 import { createClient } from '@libsql/client';
+import { getEnvVar } from '@/shared/config';
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
 function createPrismaClient(): PrismaClient {
-  const databaseUrl = process.env.DATABASE_URL || 'file:./db/custom.db';
+  const databaseUrl = getEnvVar('DATABASE_URL') || 'file:./db/custom.db';
 
   // If using Turso (libsql://), use the libSQL adapter
   if (databaseUrl.startsWith('libsql://') || databaseUrl.startsWith('libsql:')) {
-    const authToken = process.env.DATABASE_AUTH_TOKEN || '';
+    const authToken = getEnvVar('DATABASE_AUTH_TOKEN') || '';
     const libsql = createClient({ url: databaseUrl, authToken });
     const adapter = new PrismaLibSQL(libsql);
     return new PrismaClient({ adapter } as never);
