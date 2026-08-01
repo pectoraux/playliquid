@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { useSession } from '@/lib/auth/use-session';
 import { useToast } from '@/hooks/use-toast';
-import { Heart, MessageCircle, Share2, User, Play, Zap, ChevronUp, ChevronDown, Gamepad2, Sparkles, Eye, DollarSign, Monitor, Smartphone, Send, Users } from 'lucide-react';
+import { Heart, MessageCircle, Share2, User, Play, Zap, ChevronUp, ChevronDown, Gamepad2, Sparkles, Eye, DollarSign, Monitor, Smartphone, Send, Users, Bookmark, X, Crown, Medal, TrendingUp, Loader2 } from 'lucide-react';
 
 interface FeedItem {
   id: string;
@@ -43,8 +43,12 @@ export default function FeedPage() {
   const [loading, setLoading] = useState(true);
   const [offset, setOffset] = useState(0);
   const [liked, setLiked] = useState<Set<string>>(new Set());
+  const [bookmarked, setBookmarked] = useState<Set<string>>(new Set());
   const [playing, setPlaying] = useState<string | null>(null);
   const [isPreview, setIsPreview] = useState(false);
+  const [showEarnSheet, setShowEarnSheet] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [purchasing, setPurchasing] = useState(false);
   const [sessionData, setSessionData] = useState<Record<string, { hasSession: boolean; walletBalance: number }>>({});
   const [viewMode, setViewMode] = useState<ViewMode>('immersive');
   const [comments, setComments] = useState<Comment[]>([]);
@@ -121,8 +125,9 @@ export default function FeedPage() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (e.code === 'ArrowDown' || e.code === 'KeyJ') { e.preventDefault(); setCurrentIndex(p => Math.min(p + 1, items.length - 1)); }
-      else if (e.code === 'ArrowUp' || e.code === 'KeyK') { e.preventDefault(); setCurrentIndex(p => Math.max(p - 1, 0)); }
+      if (e.code === 'ArrowDown' || e.code === 'KeyJ') { e.preventDefault(); setCurrentIndex(p => Math.min(p + 1, items.length - 1)); setPlaying(null); }
+      else if (e.code === 'ArrowUp' || e.code === 'KeyK') { e.preventDefault(); setCurrentIndex(p => Math.max(p - 1, 0)); setPlaying(null); }
+      else if (e.code === 'Escape') { setShowComments(false); setShowProfile(false); setShowEarnSheet(false); setPlaying(null); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -136,10 +141,25 @@ export default function FeedPage() {
   function handlePlay(gameId: string, preview: boolean = false) {
     setIsPreview(preview);
     setPlaying(gameId);
+    setShowEarnSheet(false);
+  }
+
+  function handleEarnClick(gameId: string) {
+    const isBuiltin = ['liquid-tournament', 'bubble-pop', 'neon-runner', 'cosmic-puzzle'].includes(gameId);
+    if (isBuiltin || sessionData[gameId]?.hasSession) {
+      handlePlay(gameId, false);
+    } else {
+      setShowEarnSheet(true);
+    }
+  }
+
+  function handleBookmark(gameId: string) {
+    setBookmarked(prev => { const n = new Set(prev); n.has(gameId) ? n.delete(gameId) : n.add(gameId); return n; });
   }
 
   async function handlePurchase(gameId: string) {
     if (!session) return;
+    setPurchasing(true);
     try {
       const res = await fetch('/api/game/purchase-minutes', {
         method: 'POST',
@@ -150,12 +170,14 @@ export default function FeedPage() {
       if (data.ok) {
         toast({ title: "Let's play!", description: '5 minutes purchased. Game starting...' });
         setSessionData(prev => ({ ...prev, [gameId]: { hasSession: true, walletBalance: data.data.walletBalance } }));
+        setShowEarnSheet(false);
         setIsPreview(false);
         setPlaying(gameId);
       } else {
         toast({ title: data.code === 'INSUFFICIENT_BALANCE' ? 'Need funds' : 'Purchase failed', description: data.error, variant: 'destructive' });
       }
     } catch { toast({ title: 'Network error', variant: 'destructive' }); }
+    finally { setPurchasing(false); }
   }
 
   async function handleLike(gameId: string) {
@@ -276,16 +298,22 @@ export default function FeedPage() {
               isPlaying={playing === item.id}
               isPreview={isPreview}
               liked={liked.has(item.id)}
+              bookmarked={bookmarked.has(item.id)}
               following={following.has(item.creatorId)}
               sessionInfo={sessionData[item.id]}
               likeCount={item.likeCount + (liked.has(item.id) ? 1 : 0)}
               comments={index === currentIndex ? comments : []}
               commentText={commentText}
-              showComments={showComments}
+              showComments={showComments && index === currentIndex}
+              showEarnSheet={showEarnSheet && index === currentIndex}
+              purchasing={purchasing}
               viewMode={viewMode}
               onPlay={(preview) => handlePlay(item.id, preview)}
+              onEarn={() => handleEarnClick(item.id)}
               onPurchase={() => handlePurchase(item.id)}
+              onCloseEarn={() => setShowEarnSheet(false)}
               onLike={() => handleLike(item.id)}
+              onBookmark={() => handleBookmark(item.id)}
               onFollow={() => handleFollow(item.creatorId)}
               onGameOver={handleGameOver}
               onCommentSubmit={handleComment}
@@ -341,13 +369,13 @@ export default function FeedPage() {
 // ─── Feed Card ─────────────────────────────────────────────────────────────
 
 function FeedCard({
-  item, isActive, isPlaying, isPreview, liked, following, sessionInfo, likeCount, comments, commentText, showComments, viewMode,
-  onPlay, onPurchase, onLike, onFollow, onGameOver, onCommentSubmit, onCommentChange, onToggleComments,
+  item, isActive, isPlaying, isPreview, liked, bookmarked, following, sessionInfo, likeCount, comments, commentText, showComments, showEarnSheet, purchasing, viewMode,
+  onPlay, onEarn, onPurchase, onCloseEarn, onLike, onBookmark, onFollow, onGameOver, onCommentSubmit, onCommentChange, onToggleComments,
 }: {
-  item: FeedItem; isActive: boolean; isPlaying: boolean; isPreview: boolean; liked: boolean; following: boolean;
+  item: FeedItem; isActive: boolean; isPlaying: boolean; isPreview: boolean; liked: boolean; bookmarked: boolean; following: boolean;
   sessionInfo?: { hasSession: boolean; walletBalance: number }; likeCount: number; comments: Comment[]; commentText: string;
-  showComments: boolean; viewMode: ViewMode;
-  onPlay: (preview?: boolean) => void; onPurchase: () => void; onLike: () => void; onFollow: () => void;
+  showComments: boolean; showEarnSheet: boolean; purchasing: boolean; viewMode: ViewMode;
+  onPlay: (preview?: boolean) => void; onEarn: () => void; onPurchase: () => void; onCloseEarn: () => void; onLike: () => void; onBookmark: () => void; onFollow: () => void;
   onGameOver: (score?: number) => void; onCommentSubmit: (e: React.FormEvent) => void; onCommentChange: (v: string) => void;
   onToggleComments: () => void;
 }) {
@@ -389,8 +417,8 @@ function FeedCard({
                   <Button onClick={() => onPlay(true)} variant="outline" className="border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/10" size="lg">
                     <Eye className="mr-2 h-5 w-5" /> Preview
                   </Button>
-                  <Button onClick={onPurchase} className="bg-emerald-500 text-slate-950 hover:bg-emerald-400" size="lg">
-                    <Zap className="mr-2 h-5 w-5" /> Play (50 GHS)
+                  <Button onClick={onEarn} className="bg-emerald-500 text-slate-950 hover:bg-emerald-400" size="lg">
+                    <Zap className="mr-2 h-5 w-5" /> Play to Earn
                   </Button>
                 </>
               )}
@@ -432,6 +460,12 @@ function FeedCard({
             </div>
             <span className="text-xs text-white">{likeCount}</span>
           </button>
+          <button onClick={onBookmark} className="flex flex-col items-center gap-1">
+            <div className={`flex h-12 w-12 items-center justify-center rounded-full backdrop-blur transition ${bookmarked ? 'bg-amber-500/20 text-amber-400' : 'bg-black/40 text-white hover:bg-black/60'}`}>
+              <Bookmark className={`h-6 w-6 ${bookmarked ? 'fill-current' : ''}`} />
+            </div>
+            <span className="text-xs text-white">{bookmarked ? 'Saved' : 'Save'}</span>
+          </button>
           <button onClick={onToggleComments} className="flex flex-col items-center gap-1">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur transition hover:bg-black/60">
               <MessageCircle className="h-6 w-6" />
@@ -444,6 +478,49 @@ function FeedCard({
             </div>
             <span className="text-xs text-white">Share</span>
           </button>
+        </div>
+      )}
+
+      {/* Play to Earn Sheet */}
+      {showEarnSheet && !isPlaying && (
+        <div className="absolute inset-0 z-30 flex items-end justify-center bg-black/60 backdrop-blur-sm" onClick={onCloseEarn}>
+          <div className="w-full max-w-md rounded-t-2xl border border-white/10 bg-slate-900 p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-zinc-100">Play to Earn</h3>
+              <button onClick={onCloseEarn} className="text-zinc-500 hover:text-zinc-300"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between rounded-lg bg-white/[0.03] p-3">
+                <span className="text-sm text-zinc-400">Playtime</span>
+                <span className="font-bold text-emerald-400">5 minutes</span>
+              </div>
+              <div className="flex items-center justify-between rounded-lg bg-white/[0.03] p-3">
+                <span className="text-sm text-zinc-400">Cost</span>
+                <span className="font-bold text-amber-400">50 GHS</span>
+              </div>
+              <div className="flex items-center justify-between rounded-lg bg-white/[0.03] p-3">
+                <span className="text-sm text-zinc-400">Wallet Balance</span>
+                <span className="font-bold text-zinc-100">{sessionInfo?.walletBalance ?? 0} GHS</span>
+              </div>
+              <div className="flex items-center justify-between rounded-lg bg-white/[0.03] p-3">
+                <span className="text-sm text-zinc-400">Potential Reward</span>
+                <span className="font-bold text-emerald-400">Up to 500 GHS</span>
+              </div>
+              <div className="flex items-center justify-between rounded-lg bg-white/[0.03] p-3">
+                <span className="text-sm text-zinc-400">Leaderboard</span>
+                <span className="font-bold text-cyan-400">Competitive eligible</span>
+              </div>
+              {(sessionInfo?.walletBalance ?? 0) < 50 ? (
+                <Link href="/wallet" className="block">
+                  <Button className="w-full bg-amber-500 text-slate-950 hover:bg-amber-400">Deposit Funds</Button>
+                </Link>
+              ) : (
+                <Button onClick={onPurchase} disabled={purchasing} className="w-full bg-emerald-500 text-slate-950 hover:bg-emerald-400">
+                  {purchasing ? <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Processing...</> : <><Zap className="mr-2 h-5 w-5" /> Purchase & Play</>}
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
