@@ -71,19 +71,15 @@ interface NavItem {
 
 const NAV_BY_ROLE: Record<string, NavItem[]> = {
   player: [
-    { label: 'Home', href: '/home', icon: HomeIcon },
+    { label: 'Feed', href: '/feed', icon: HomeIcon },
     { label: 'Play', href: '/play', icon: Gamepad2 },
-    { label: 'Games', href: '/games', icon: Rocket },
     { label: 'Wallet', href: '/wallet', icon: WalletIcon },
-    { label: 'Community', href: '/community', icon: Users },
-    { label: 'Rewards', href: '/rewards', icon: Gift },
     { label: 'Profile', href: '/profile', icon: UserIcon },
   ],
   creator: [
-    { label: 'Home', href: '/home', icon: HomeIcon },
-    { label: 'Create', href: '/create', icon: Palette },
-    { label: 'My Games', href: '/my-games', icon: Rocket },
+    { label: 'Feed', href: '/feed', icon: HomeIcon },
     { label: 'AI Studio', href: '/ai-studio', icon: Sparkles },
+    { label: 'My Games', href: '/my-games', icon: Rocket },
     { label: 'Revenue', href: '/revenue', icon: BarChart3 },
     { label: 'Profile', href: '/profile', icon: UserIcon },
   ],

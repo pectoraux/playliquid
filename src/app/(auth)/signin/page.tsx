@@ -85,7 +85,7 @@ function SignInForm() {
         return;
       }
       toast({ title: 'Welcome back!', description: 'Redirecting to your dashboard…' });
-      setTimeout(() => { window.location.href = '/home'; }, 100);
+      setTimeout(() => { window.location.href = '/feed'; }, 100);
     } catch (err) {
       toast({ title: 'Network error', description: 'Could not reach the server.', variant: 'destructive' });
       setLoading(false);
@@ -107,7 +107,7 @@ function SignInForm() {
         return;
       }
       toast({ title: `Signed in as ${demo.displayName}`, description: 'Redirecting…' });
-      setTimeout(() => { window.location.href = '/home'; }, 100);
+      setTimeout(() => { window.location.href = '/feed'; }, 100);
     } catch {
       toast({ title: 'Network error', description: 'Could not reach the server.', variant: 'destructive' });
       setLoading(false);
