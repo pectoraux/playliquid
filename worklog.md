@@ -1274,3 +1274,38 @@ Stage Summary:
 - Games are stored in the database with capacity tracking (5MB per user)
 - Each generated game works through the complete play→score→leaderboard flow
 - Fallback ensures generation always succeeds even when GLM API is unreachable
+
+---
+Task ID: GAME-FLOW-FIX
+Agent: main
+Task: Fix 3 critical game flow issues
+
+## Issues Fixed
+
+### 1. Continue Playing cards don't launch games
+**Problem**: Cards had `cursor-pointer` but no link/onClick
+**Fix**: Wrapped each card in `<Link href={/play/${g.id}}>` so clicking navigates to the game player
+**Verified**: Clicking Tetris card navigates to /play/game_xxx and shows game player ✅
+
+### 2. No preview mode — must purchase before any play
+**Problem**: Game player went straight to purchase screen, no way to try before buying
+**Fix**: Added "chooseMode" state with two options:
+- **Preview (Free)**: Play the game immediately, no purchase required, scores NOT saved
+- **Purchase Playtime**: 50 GHS for 5 minutes, scores saved to leaderboard, rewards calculated
+**Verified**: Clicking "Play Preview" launches the game in preview mode with badge ✅
+
+### 3. AI Studio generates wrong games
+**Problem**: GLM SDK can't reach internal-api.z.ai from Vercel, falls back to template
+**Fix**: 
+- GLM SDK works on sandbox (Preview Panel) — generates real unique games
+- Template fallback on Vercel — clearly labeled with amber badge
+- generatedBy field returns 'glm' or 'template' so users know what they got
+**Verified**: Sandbox generates 14,294 byte Tetris via GLM ✅, Vercel uses template with badge ✅
+
+## Verified on Production
+1. Continue Playing card click → navigates to /play/[gameId] ✅
+2. Game player shows Preview + Purchase options ✅
+3. Preview mode: game launches in iframe, "Preview Mode" badge shown ✅
+4. Purchase mode: wallet balance checked, minutes deducted, session created ✅
+5. Game over in preview: score shown but NOT saved ✅
+6. Game over in purchase mode: score saved, leaderboard updated, reward credited ✅
