@@ -115,8 +115,10 @@ Game type: ${prompt}`;
     }
 
     // Step 3: If still no game HTML, use the template fallback
+    let usedFallback = false;
     if (!gameHtml) {
       gameHtml = generateTemplateGame(title || prompt, prompt);
+      usedFallback = true;
     }
 
     // Clean up: remove markdown code fences if present
@@ -188,6 +190,7 @@ Game type: ${prompt}`;
         capacityLimit: MAX_CAPACITY_BYTES,
         capacityRemaining: MAX_CAPACITY_BYTES - usedBytes - fileSize,
         previewUrl: `/api/game/content/${gameId}`,
+        generatedBy: usedFallback ? 'template' : 'glm',
       },
     });
   } catch (e) {

@@ -25,7 +25,7 @@ export default function AiStudioPage() {
   const [title, setTitle] = useState('');
   const [generating, setGenerating] = useState(false);
   const [capacity, setCapacity] = useState<{ used: number; limit: number; remaining: number; gameCount: number; games: Array<{ gameId: string; title: string; size: number }> } | null>(null);
-  const [generatedGame, setGeneratedGame] = useState<{ gameId: string; title: string; previewUrl: string; capacityRemaining: number } | null>(null);
+  const [generatedGame, setGeneratedGame] = useState<{ gameId: string; title: string; previewUrl: string; capacityRemaining: number; generatedBy?: string } | null>(null);
 
   useEffect(() => {
     if (session) loadCapacity();
@@ -71,8 +71,10 @@ export default function AiStudioPage() {
           title: data.data.title,
           previewUrl: data.data.previewUrl,
           capacityRemaining: data.data.capacityRemaining,
+          generatedBy: data.data.generatedBy,
         });
-        toast({ title: 'Game generated!', description: `"${data.data.title}" is ready to play.` });
+        const genBy = data.data.generatedBy === 'glm' ? 'GLM 5.2' : 'template engine';
+        toast({ title: 'Game generated!', description: `"${data.data.title}" created by ${genBy}.` });
         loadCapacity(); // Refresh capacity
       } else {
         toast({ title: 'Generation failed', description: data.error, variant: 'destructive' });
@@ -198,7 +200,14 @@ export default function AiStudioPage() {
               </div>
               <div>
                 <h2 className="font-bold text-zinc-100">{generatedGame.title}</h2>
-                <p className="text-sm text-zinc-500">Game generated and deployed successfully!</p>
+                <p className="text-sm text-zinc-500">
+                  Game generated and deployed successfully!
+                  {generatedGame.generatedBy === 'glm' ? (
+                    <Badge className="ml-2 bg-emerald-500/20 text-emerald-300">GLM 5.2</Badge>
+                  ) : (
+                    <Badge className="ml-2 bg-amber-500/20 text-amber-300">Template (GLM unavailable on this server)</Badge>
+                  )}
+                </p>
               </div>
             </div>
 
