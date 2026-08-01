@@ -239,14 +239,15 @@ function PlayerHome({ data }: { data: PlayerData }) {
         <SectionHeader title="Continue Playing" icon={Gamepad2} action={<Button asChild variant="ghost" size="sm" className="text-zinc-400 hover:text-zinc-100"><Link href="/games">View all<ArrowRight className="h-3.5 w-3.5" /></Link></Button>} />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {(data?.recentGames ?? []).map((g) => (
-            <Card key={g.id} className="group cursor-pointer border-white/5 bg-white/[0.02] transition hover:border-emerald-500/30 hover:bg-white/[0.04]">
+            <Link key={g.id} href={`/play/${g.id}`}>
+            <Card className="group cursor-pointer border-white/5 bg-white/[0.02] transition hover:border-emerald-500/30 hover:bg-white/[0.04]">
               <CardContent className="p-4">
                 <div className="mb-3 flex h-16 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 text-3xl">
                   {g.thumbnail || '🎮'}
                 </div>
                 <div className="truncate text-sm font-medium text-zinc-100">{g.title}</div>
                 <div className="mt-0.5 flex items-center gap-1 text-xs text-zinc-500">
-                  <Clock className="h-3 w-3" />{g.lastPlayed || 'Never'}
+                  <Clock className="h-3 w-3" />{g.lastPlayed || 'Never played'}
                 </div>
                 <div className="mt-3">
                   <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wider text-zinc-500">
@@ -254,8 +255,12 @@ function PlayerHome({ data }: { data: PlayerData }) {
                     <span className="text-emerald-400">{g.status || 'available'}</span>
                   </div>
                 </div>
+                <div className="mt-2 flex items-center gap-1 text-xs font-medium text-emerald-300 opacity-0 transition-opacity group-hover:opacity-100">
+                  Play Now <ArrowRight className="h-3 w-3" />
+                </div>
               </CardContent>
             </Card>
+            </Link>
           ))}
           {(!data?.recentGames || data.recentGames.length === 0) && (
             <Card className="border-white/5 bg-white/[0.02]">

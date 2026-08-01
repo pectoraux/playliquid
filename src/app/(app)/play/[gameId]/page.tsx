@@ -1,13 +1,12 @@
 'use client';
 
 import { use } from 'react';
-import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, ArrowLeft, Home, Trophy, Wallet, Clock, Play, Zap, RotateCcw, CheckCircle, TrendingUp } from 'lucide-react';
+import { Loader2, ArrowLeft, Home, Trophy, Wallet, Clock, Zap, RotateCcw, TrendingUp, Eye, DollarSign } from 'lucide-react';
 import { useSession } from '@/lib/auth/use-session';
 import { useToast } from '@/hooks/use-toast';
 
@@ -18,8 +17,7 @@ const GAMES: Record<string, { title: string; description: string }> = {
   'cosmic-puzzle': { title: 'Cosmic Puzzle', description: 'Match all cosmic pairs!' },
 };
 
-type GameState = 'checking' | 'needPurchase' | 'playing' | 'gameOver';
-type GameMode = 'builtin' | 'catalog';
+type GameState = 'checking' | 'chooseMode' | 'needPurchase' | 'playing' | 'gameOver';
 
 export default function GamePlayerPage({ params }: { params: Promise<{ gameId: string }> }) {
   const { gameId } = use(params);
@@ -31,16 +29,30 @@ export default function GamePlayerPage({ params }: { params: Promise<{ gameId: s
   const [reward, setReward] = useState(0);
   const [leaderboardUpdated, setLeaderboardUpdated] = useState(false);
   const [purchasing, setPurchasing] = useState(false);
+  const [isPreview, setIsPreview] = useState(false);
+  const [gameTitle, setGameTitle] = useState(GAMES[gameId]?.title || gameId);
+  const [gameDescription, setGameDescription] = useState(GAMES[gameId]?.description || 'Play this game');
 
   const isBuiltin = GAMES[gameId] !== undefined;
-  const gameTitle = GAMES[gameId]?.title || gameId;
-  const gameDescription = GAMES[gameId]?.description || 'Play this game';
 
-  // Check session status on mount
   useEffect(() => {
     if (!session) return;
     checkSessionStatus();
   }, [session]);
+
+  // Fetch game metadata from catalog if not builtin
+  useEffect(() => {
+    if (isBuiltin) return;
+    fetch(`/api/games`).then(r => r.json()).then(d => {
+      if (d.ok) {
+        const game = d.data.find((g: { id: string }) => g.id === gameId);
+        if (game) {
+          setGameTitle(game.title);
+          setGameDescription('Play this game');
+        }
+      }
+    }).catch(() => {});
+  }, [gameId, isBuiltin]);
 
   async function checkSessionStatus() {
     if (!session) return;
@@ -52,11 +64,14 @@ export default function GamePlayerPage({ params }: { params: Promise<{ gameId: s
         if (data.data.hasActiveSession && data.data.minutesRemaining > 0) {
           setGameState('playing');
         } else {
-          setGameState('needPurchase');
+          // Show choose mode: preview (free) or purchase (paid with scores)
+          setGameState('chooseMode');
         }
+      } else {
+        setGameState('chooseMode');
       }
     } catch {
-      setGameState('needPurchase');
+      setGameState('chooseMode');
     }
   }
 
@@ -77,6 +92,7 @@ export default function GamePlayerPage({ params }: { params: Promise<{ gameId: s
           walletBalance: data.data.walletBalance,
           walletCurrency: 'GHS',
         });
+        setIsPreview(false);
         setGameState('playing');
         toast({ title: 'Session purchased!', description: `5 minutes purchased. ${data.data.walletBalance} GHS remaining.` });
       } else {
@@ -93,9 +109,20 @@ export default function GamePlayerPage({ params }: { params: Promise<{ gameId: s
     }
   }
 
+  function handlePreview() {
+    setIsPreview(true);
+    setGameState('playing');
+    toast({ title: 'Preview mode', description: 'Playing in preview mode. Scores will not be saved. Purchase minutes to compete on leaderboards.' });
+  }
+
   async function handleGameOver(finalScore: number) {
     setScore(finalScore);
-    if (!sessionData?.sessionId) return;
+
+    // If preview mode, don't submit score
+    if (isPreview || !sessionData?.sessionId) {
+      setGameState('gameOver');
+      return;
+    }
 
     try {
       const res = await fetch('/api/game/end-session', {
@@ -138,54 +165,75 @@ export default function GamePlayerPage({ params }: { params: Promise<{ gameId: s
       <div>
         <h1 className="text-2xl font-bold text-zinc-100">{gameTitle}</h1>
         <p className="text-sm text-zinc-500">{gameDescription}</p>
+        {isPreview && <Badge className="mt-2 bg-amber-500/20 text-amber-300">Preview Mode</Badge>}
       </div>
 
-      {/* Need Purchase State */}
+      {/* Choose Mode: Preview or Purchase */}
+      {gameState === 'chooseMode' && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {/* Preview (Free) */}
+          <Card className="cursor-pointer border-white/5 bg-white/[0.02] transition hover:border-emerald-500/30" onClick={handlePreview}>
+            <CardContent className="p-6 text-center">
+              <Eye className="mx-auto h-10 w-10 text-cyan-400" />
+              <h2 className="mt-3 font-bold text-zinc-100">Preview (Free)</h2>
+              <p className="mt-1 text-sm text-zinc-500">Try the game without purchasing. Scores won't be saved.</p>
+              <Button className="mt-4 w-full bg-cyan-500 text-slate-950 hover:bg-cyan-400">
+                <Eye className="mr-2 h-4 w-4" /> Play Preview
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Purchase (Paid) */}
+          <Card className="cursor-pointer border-white/5 bg-white/[0.02] transition hover:border-emerald-500/30">
+            <CardContent className="p-6 text-center">
+              <DollarSign className="mx-auto h-10 w-10 text-emerald-400" />
+              <h2 className="mt-3 font-bold text-zinc-100">Purchase Playtime</h2>
+              <p className="mt-1 text-sm text-zinc-500">5 minutes for 50 GHS. Scores saved to leaderboard.</p>
+              <div className="mt-4 flex justify-center gap-6 text-sm">
+                <div>
+                  <div className="font-bold text-emerald-400">{sessionData?.walletBalance ?? 0}</div>
+                  <div className="text-xs text-zinc-500">Wallet (GHS)</div>
+                </div>
+                <div>
+                  <div className="font-bold text-amber-400">50 GHS</div>
+                  <div className="text-xs text-zinc-500">Cost</div>
+                </div>
+              </div>
+              <Button
+                onClick={handlePurchase}
+                disabled={purchasing}
+                className="mt-4 w-full bg-emerald-500 text-slate-950 hover:bg-emerald-400"
+              >
+                {purchasing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Zap className="mr-2 h-4 w-4" />}
+                Purchase & Play
+              </Button>
+              {(sessionData?.walletBalance ?? 0) < 50 && (
+                <p className="mt-2 text-xs text-amber-400">
+                  <Link href="/wallet" className="underline">Deposit funds</Link> to your wallet.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Need Purchase (old state, redirect to chooseMode) */}
       {gameState === 'needPurchase' && (
         <Card className="border-white/5 bg-white/[0.02]">
-          <CardContent className="flex flex-col items-center py-12 text-center">
-            <Wallet className="h-12 w-12 text-amber-400" />
-            <h2 className="mt-4 text-xl font-bold text-zinc-100">Purchase Playtime</h2>
-            <p className="mt-2 max-w-md text-sm text-zinc-400">
-              You need playtime to play this game. Purchase 5 minutes for 50 GHS.
-            </p>
-            <div className="mt-4 flex gap-6">
-              <div className="text-center">
-                <div className="text-2xl font-bold text-emerald-400">{sessionData?.walletBalance ?? 0}</div>
-                <div className="text-xs text-zinc-500">Wallet Balance (GHS)</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-cyan-400">5 min</div>
-                <div className="text-xs text-zinc-500">Playtime</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-amber-400">50 GHS</div>
-                <div className="text-xs text-zinc-500">Cost</div>
-              </div>
-            </div>
-            <Button
-              onClick={handlePurchase}
-              disabled={purchasing}
-              className="mt-6 bg-emerald-500 text-slate-950 hover:bg-emerald-400"
-              size="lg"
-            >
-              {purchasing ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Zap className="mr-2 h-5 w-5" />}
-              Purchase & Play
+          <CardContent className="p-6 text-center">
+            <Button onClick={() => setGameState('chooseMode')} className="bg-emerald-500 text-slate-950 hover:bg-emerald-400">
+              Choose Mode
             </Button>
-            {(sessionData?.walletBalance ?? 0) < 50 && (
-              <p className="mt-3 text-sm text-amber-400">
-                Insufficient balance. <Link href="/wallet" className="underline">Deposit funds</Link> to your wallet.
-              </p>
-            )}
           </CardContent>
         </Card>
       )}
 
-      {/* Playing State */}
+      {/* Playing State — Builtin Games */}
       {gameState === 'playing' && isBuiltin && (
-        <GameWrapper gameId={gameId} onGameOver={handleGameOver} sessionData={sessionData} />
+        <GameWrapper gameId={gameId} onGameOver={handleGameOver} />
       )}
 
+      {/* Playing State — AI-Generated / Catalog Games */}
       {gameState === 'playing' && !isBuiltin && (
         <div className="space-y-4">
           <div className="overflow-hidden rounded-2xl border border-white/10">
@@ -197,15 +245,15 @@ export default function GamePlayerPage({ params }: { params: Promise<{ gameId: s
             />
           </div>
           <Button
-            onClick={() => handleGameOver(sessionData?.minutesRemaining ? 100 : 50)}
+            onClick={() => handleGameOver(isPreview ? 0 : (sessionData?.minutesRemaining ? 100 : 50))}
             className="bg-emerald-500 text-slate-950 hover:bg-emerald-400"
           >
-            End Game & Submit Score
+            End Game & {isPreview ? 'Exit' : 'Submit Score'}
           </Button>
         </div>
       )}
 
-      {/* Game Over State */}
+      {/* Game Over */}
       {gameState === 'gameOver' && (
         <Card className="border-white/5 bg-white/[0.02]">
           <CardContent className="flex flex-col items-center py-12 text-center">
@@ -216,22 +264,28 @@ export default function GamePlayerPage({ params }: { params: Promise<{ gameId: s
                 <div className="text-3xl font-bold text-emerald-400">{score}</div>
                 <div className="text-sm text-zinc-500">Final Score</div>
               </div>
-              {reward > 0 && (
+              {!isPreview && reward > 0 && (
                 <div className="text-center">
                   <div className="text-3xl font-bold text-amber-400">+{reward}</div>
                   <div className="text-sm text-zinc-500">Reward (GHS)</div>
                 </div>
               )}
             </div>
-            {leaderboardUpdated && (
+            {isPreview && (
+              <p className="mt-3 text-sm text-zinc-500">Preview mode — score not saved</p>
+            )}
+            {!isPreview && leaderboardUpdated && (
               <Badge className="mt-4 bg-emerald-500/20 text-emerald-300">
                 <TrendingUp className="mr-1 h-3 w-3" /> Leaderboard updated!
               </Badge>
             )}
             <div className="mt-8 flex gap-3">
-              <Button onClick={checkSessionStatus} className="bg-emerald-500 text-slate-950 hover:bg-emerald-400">
+              {!isPreview && <Button onClick={checkSessionStatus} className="bg-emerald-500 text-slate-950 hover:bg-emerald-400">
                 <RotateCcw className="mr-2 h-4 w-4" /> Play Again
-              </Button>
+              </Button>}
+              {isPreview && <Button onClick={handlePreview} className="bg-cyan-500 text-slate-950 hover:bg-cyan-400">
+                <RotateCcw className="mr-2 h-4 w-4" /> Preview Again
+              </Button>}
               <Button asChild variant="outline" className="border-white/10">
                 <Link href="/play">Back to Games</Link>
               </Button>
@@ -245,25 +299,17 @@ export default function GamePlayerPage({ params }: { params: Promise<{ gameId: s
 
 // ─── Game Wrapper ──────────────────────────────────────────────────────────
 
-function GameWrapper({ gameId, onGameOver, sessionData }: { gameId: string; onGameOver: (score: number) => void; sessionData: { sessionId: string; minutesRemaining: number } | null }) {
-  // Dynamic import the actual game component
-  if (gameId === 'liquid-tournament') return <LiquidTournamentGame onGameOver={onGameOver} sessionData={sessionData} />;
-  if (gameId === 'bubble-pop') return <BubblePopGame onGameOver={onGameOver} sessionData={sessionData} />;
-  if (gameId === 'neon-runner') return <NeonRunnerGame onGameOver={onGameOver} sessionData={sessionData} />;
-  if (gameId === 'cosmic-puzzle') return <CosmicPuzzleGame onGameOver={onGameOver} sessionData={sessionData} />;
-
-  return (
-    <Card className="border-white/5 bg-white/[0.02]">
-      <CardContent className="flex flex-col items-center py-12 text-center">
-        <p className="text-zinc-400">Unknown game: {gameId}</p>
-      </CardContent>
-    </Card>
-  );
+function GameWrapper({ gameId, onGameOver }: { gameId: string; onGameOver: (score: number) => void }) {
+  if (gameId === 'liquid-tournament') return <LiquidTournamentGame onGameOver={onGameOver} />;
+  if (gameId === 'bubble-pop') return <BubblePopGame onGameOver={onGameOver} />;
+  if (gameId === 'neon-runner') return <NeonRunnerGame onGameOver={onGameOver} />;
+  if (gameId === 'cosmic-puzzle') return <CosmicPuzzleGame onGameOver={onGameOver} />;
+  return <Card><CardContent className="py-12 text-center text-zinc-400">Unknown game: {gameId}</CardContent></Card>;
 }
 
-// ─── Liquid Tournament Game ────────────────────────────────────────────────
+// ─── Liquid Tournament ────────────────────────────────────────────────────
 
-function LiquidTournamentGame({ onGameOver, sessionData }: { onGameOver: (score: number) => void; sessionData: { sessionId: string; minutesRemaining: number } | null }) {
+function LiquidTournamentGame({ onGameOver }: { onGameOver: (score: number) => void }) {
   const [score, setScore] = useState(0);
   const [timeLeft, setTimeLeft] = useState(30);
   const [targets, setTargets] = useState<Array<{ id: number; x: number; y: number; color: string }>>([]);
@@ -271,6 +317,7 @@ function LiquidTournamentGame({ onGameOver, sessionData }: { onGameOver: (score:
   const targetId = useRef(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const spawnerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const scoreRef = useRef(0);
 
   useEffect(() => {
     timerRef.current = setInterval(() => {
@@ -279,7 +326,7 @@ function LiquidTournamentGame({ onGameOver, sessionData }: { onGameOver: (score:
           if (timerRef.current) clearInterval(timerRef.current);
           if (spawnerRef.current) clearInterval(spawnerRef.current);
           setPlaying(false);
-          onGameOver(score);
+          onGameOver(scoreRef.current);
           return 0;
         }
         return prev - 1;
@@ -297,11 +344,12 @@ function LiquidTournamentGame({ onGameOver, sessionData }: { onGameOver: (score:
       if (timerRef.current) clearInterval(timerRef.current);
       if (spawnerRef.current) clearInterval(spawnerRef.current);
     };
-  }, [score, onGameOver]);
+  }, [onGameOver]);
 
   function hit(id: number) {
     setTargets((prev) => prev.filter((t) => t.id !== id));
-    setScore((prev) => prev + 10);
+    scoreRef.current += 10;
+    setScore(scoreRef.current);
   }
 
   if (!playing) return null;
@@ -321,14 +369,15 @@ function LiquidTournamentGame({ onGameOver, sessionData }: { onGameOver: (score:
   );
 }
 
-// ─── Bubble Pop Game ───────────────────────────────────────────────────────
+// ─── Bubble Pop ───────────────────────────────────────────────────────────
 
-function BubblePopGame({ onGameOver, sessionData }: { onGameOver: (score: number) => void; sessionData: { sessionId: string; minutesRemaining: number } | null }) {
+function BubblePopGame({ onGameOver }: { onGameOver: (score: number) => void }) {
   const [score, setScore] = useState(0);
   const [timeLeft, setTimeLeft] = useState(45);
   const [bubbles, setBubbles] = useState<Array<{ id: number; x: number; y: number; color: string; points: number }>>([]);
   const [playing, setPlaying] = useState(true);
   const bubbleId = useRef(0);
+  const scoreRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const spawnerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -339,7 +388,7 @@ function BubblePopGame({ onGameOver, sessionData }: { onGameOver: (score: number
           if (timerRef.current) clearInterval(timerRef.current);
           if (spawnerRef.current) clearInterval(spawnerRef.current);
           setPlaying(false);
-          onGameOver(score);
+          onGameOver(scoreRef.current);
           return 0;
         }
         return prev - 1;
@@ -348,7 +397,7 @@ function BubblePopGame({ onGameOver, sessionData }: { onGameOver: (score: number
 
     spawnerRef.current = setInterval(() => {
       const id = bubbleId.current++;
-      const colors = [['#10b981', 10], ['#06b6d4', 15], ['#8b5cf6', 20], ['#ef4444', 50]] as const;
+      const colors: Array<[string, number]> = [['#10b981', 10], ['#06b6d4', 15], ['#8b5cf6', 20], ['#ef4444', 50]];
       const [color, points] = colors[Math.random() < 0.1 ? 3 : Math.floor(Math.random() * 3)];
       setBubbles((prev) => [...prev, { id, x: Math.random() * 85 + 7, y: Math.random() * 70 + 15, color, points }]);
       setTimeout(() => setBubbles((prev) => prev.filter((b) => b.id !== id)), 2500);
@@ -358,11 +407,12 @@ function BubblePopGame({ onGameOver, sessionData }: { onGameOver: (score: number
       if (timerRef.current) clearInterval(timerRef.current);
       if (spawnerRef.current) clearInterval(spawnerRef.current);
     };
-  }, [score, onGameOver]);
+  }, [onGameOver]);
 
   function pop(id: number, points: number) {
     setBubbles((prev) => prev.filter((b) => b.id !== id));
-    setScore((prev) => prev + points);
+    scoreRef.current += points;
+    setScore(scoreRef.current);
   }
 
   if (!playing) return null;
@@ -382,16 +432,16 @@ function BubblePopGame({ onGameOver, sessionData }: { onGameOver: (score: number
   );
 }
 
-// ─── Neon Runner Game ─────────────────────────────────────────────────────
+// ─── Neon Runner ──────────────────────────────────────────────────────────
 
-function NeonRunnerGame({ onGameOver, sessionData }: { onGameOver: (score: number) => void; sessionData: { sessionId: string; minutesRemaining: number } | null }) {
+function NeonRunnerGame({ onGameOver }: { onGameOver: (score: number) => void }) {
   const [score, setScore] = useState(0);
   const [playing, setPlaying] = useState(true);
   const [playerY, setPlayerY] = useState(0);
-  const [obstacles, setObstacles] = useState<Array<{ id: number; x: number; type: string }>>([]);
+  const [obstacles, setObstacles] = useState<Array<{ id: number; x: number }>>([]);
   const velRef = useRef(0);
   const pyRef = useRef(0);
-  const obsRef = useRef<Array<{ id: number; x: number; type: string }>>([]);
+  const obsRef = useRef<Array<{ id: number; x: number }>>([]);
   const scoreRef = useRef(0);
   const frameRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const spawnRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -403,29 +453,23 @@ function NeonRunnerGame({ onGameOver, sessionData }: { onGameOver: (score: numbe
       pyRef.current += velRef.current;
       if (pyRef.current > 0) { pyRef.current = 0; velRef.current = 0; }
       setPlayerY(pyRef.current);
-
       obsRef.current = obsRef.current.map(o => ({ ...o, x: o.x - 3 })).filter(o => o.x > -10);
-
-      // Collision
       for (const obs of obsRef.current) {
-        if (obs.x > 10 && obs.x < 25) {
-          if (obs.type === 'low' && pyRef.current > -15) {
-            if (frameRef.current) clearInterval(frameRef.current);
-            if (spawnRef.current) clearInterval(spawnRef.current);
-            setPlaying(false);
-            onGameOver(scoreRef.current);
-            return;
-          }
+        if (obs.x > 10 && obs.x < 25 && pyRef.current > -15) {
+          if (frameRef.current) clearInterval(frameRef.current);
+          if (spawnRef.current) clearInterval(spawnRef.current);
+          setPlaying(false);
+          onGameOver(scoreRef.current);
+          return;
         }
       }
-
       setObstacles([...obsRef.current]);
       scoreRef.current += 1;
       setScore(scoreRef.current);
     }, 30);
 
     spawnRef.current = setInterval(() => {
-      obsRef.current.push({ id: obsId.current++, x: 100, type: 'low' });
+      obsRef.current.push({ id: obsId.current++, x: 100 });
     }, 1800);
 
     return () => {
@@ -434,14 +478,10 @@ function NeonRunnerGame({ onGameOver, sessionData }: { onGameOver: (score: numbe
     };
   }, [onGameOver]);
 
-  function jump() {
-    if (pyRef.current >= 0) velRef.current = -12;
-  }
+  function jump() { if (pyRef.current >= 0) velRef.current = -12; }
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); jump(); }
-    };
+    const handler = (e: KeyboardEvent) => { if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); jump(); } };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
@@ -465,9 +505,9 @@ function NeonRunnerGame({ onGameOver, sessionData }: { onGameOver: (score: numbe
   );
 }
 
-// ─── Cosmic Puzzle Game ────────────────────────────────────────────────────
+// ─── Cosmic Puzzle ────────────────────────────────────────────────────────
 
-function CosmicPuzzleGame({ onGameOver, sessionData }: { onGameOver: (score: number) => void; sessionData: { sessionId: string; minutesRemaining: number } | null }) {
+function CosmicPuzzleGame({ onGameOver }: { onGameOver: (score: number) => void }) {
   const [cards, setCards] = useState<Array<{ id: number; emoji: string; flipped: boolean; matched: boolean }>>([]);
   const [flipped, setFlipped] = useState<number[]>([]);
   const [moves, setMoves] = useState(0);
@@ -485,28 +525,22 @@ function CosmicPuzzleGame({ onGameOver, sessionData }: { onGameOver: (score: num
     if (lockRef.current || flipped.includes(id)) return;
     const card = cards.find(c => c.id === id);
     if (!card || card.matched) return;
-
     const newFlipped = [...flipped, id];
     setFlipped(newFlipped);
     setCards(prev => prev.map(c => c.id === id ? { ...c, flipped: true } : c));
-
     if (newFlipped.length === 2) {
       lockRef.current = true;
       setMoves(prev => prev + 1);
       const [first, second] = newFlipped;
       const firstCard = cards.find(c => c.id === first);
       const secondCard = cards.find(c => c.id === second);
-
       if (firstCard?.emoji === secondCard?.emoji) {
         setTimeout(() => {
           setCards(prev => prev.map(c => (c.id === first || c.id === second) ? { ...c, matched: true } : c));
           setMatches(prev => {
-            const newMatches = prev + 1;
-            if (newMatches === 8) {
-              setPlaying(false);
-              onGameOver(Math.max(100 - moves * 5, 10));
-            }
-            return newMatches;
+            const n = prev + 1;
+            if (n === 8) { setPlaying(false); onGameOver(Math.max(100 - moves * 5, 10)); }
+            return n;
           });
           setFlipped([]);
           lockRef.current = false;
