@@ -1402,3 +1402,45 @@ Task: Production AI providers + social layer + responsive feed UX
 - Code pushed to GitHub: https://github.com/pectoraux/playliquid
 - App fully functional on sandbox (Preview Panel)
 - For Vercel: set LLM_PROVIDER=openai and LLM_API_KEY for AI generation on production
+
+---
+Task ID: INTERACTIVE-FEED
+Agent: main
+Task: Interactive Feed Experience — renamed nav, dual leaderboards, deploy
+
+## Built
+
+### Navigation Renamed (Product Language)
+| Old | New | Icon |
+|-----|-----|------|
+| Feed | Discover | Compass |
+| Play | Compete | Trophy |
+| Wallet | Rewards | Wallet |
+| AI Studio | Create | Sparkles |
+| Home | Discover | Compass |
+
+All roles now land on /feed (Discover) as default entry point.
+
+### Compete Page with Dual Leaderboards
+- Created /compete page
+- Game selector (horizontal scroll of game buttons)
+- Global tab (amber theme): all players, all scores
+- Competitive tab (emerald theme): only paid, verified sessions
+- Toggle between tabs is instant
+- Top 3 with Crown/Medal icons
+- Current player highlighted with "You" badge
+- Play button at bottom to jump into the game
+- Empty states with calls to action
+
+### Verified on Production (https://my-project-dun-theta.vercel.app)
+- All 8 pages: 200 ✅
+- Login: OK ✅
+- Feed page shows Discover/Compete/Rewards/Profile nav ✅
+- Compete page shows game selector, Global/Competitive tabs ✅
+- Deployed successfully with new Vercel token ✅
+
+Stage Summary:
+- Navigation uses product language: Discover, Compete, Create, Rewards, Profile
+- Dual leaderboards (Global + Competitive) on /compete page
+- Feed is the primary discovery experience
+- App deployed and live on Vercel
