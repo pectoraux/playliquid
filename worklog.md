@@ -1444,3 +1444,50 @@ Stage Summary:
 - Dual leaderboards (Global + Competitive) on /compete page
 - Feed is the primary discovery experience
 - App deployed and live on Vercel
+
+---
+Task ID: UNIFIED-GAMEPLAY
+Agent: main
+Task: Unified gameplay + dual leaderboards + premium feed experience
+
+## Built
+
+### Unified Gameplay (Preview = Paid, Same Engine)
+- Removed the chooseMode screen — game starts IMMEDIATELY when you open it
+- Preview and paid use IDENTICAL game engine — no duplicate code
+- Only differences between preview and paid:
+  - Preview: scores go to Global leaderboard only, no rewards, no competitive eligibility
+  - Paid: scores go to BOTH Global + Competitive leaderboards, rewards earned, competitive eligible
+- "Upgrade to Earn" banner appears during preview play — purchase inline without leaving game
+- Badge shows "Earning Mode" (emerald) or "Preview Mode" (cyan) during gameplay
+- Game over screen adapts: shows reward only if paid, shows upgrade CTA if preview
+
+### Dual Leaderboards (Global + Competitive)
+- GET /api/game/leaderboard now accepts type=global|competitive
+- Global leaderboard: ALL scores (preview + paid players)
+- Competitive leaderboard: only scores from paid sessions (GameSession.isPreview=false)
+- Compete page has instant toggle between Global and Competitive tabs
+
+### Feed Experience
+- Auto-play: game preview starts when card becomes active
+- Keyboard nav: ↑↓ (J/K) navigate, Esc closes overlays, Enter opens Earn
+- Play to Earn sheet: inline purchase without leaving feed
+- Shows: playtime, cost, wallet balance, potential reward, leaderboard eligibility
+- Bookmark button added to social sidebar
+- View mode toggle (Immersive/Browse) saved to localStorage
+
+### Verified on Production
+- All 7 pages: 200 ✅
+- Player login: OK ✅
+- Feed shows game cards with Play to Earn buttons ✅
+- Earn sheet opens inline showing all details ✅
+- Global leaderboard: 1 entry (player_demo: 250) ✅
+- Competitive leaderboard: 0 entries (no paid sessions yet) ✅
+- Navigation: Discover, Compete, Rewards, Profile ✅
+- Deployed to Vercel ✅
+
+Stage Summary:
+- Preview and paid gameplay are now IDENTICAL — same engine, same experience
+- Only difference: paid sessions earn rewards + appear on competitive leaderboard
+- Dual leaderboards: Global (everyone) + Competitive (paid only)
+- Feed-first experience with auto-play, inline earn, bookmarks, gesture nav
