@@ -1309,3 +1309,49 @@ Task: Fix 3 critical game flow issues
 4. Purchase mode: wallet balance checked, minutes deducted, session created ✅
 5. Game over in preview: score shown but NOT saved ✅
 6. Game over in purchase mode: score saved, leaderboard updated, reward credited ✅
+
+---
+Task ID: FEED-ENGINE
+Agent: main
+Task: Strategic pivot — TikTok for AI-generated games
+
+## What Changed
+
+### AI Provider Abstraction (Fixes AI Studio permanently)
+- Created LlmProviderPort interface in src/domain/gaming/llm-provider.ts
+- Z.ai is just one adapter (works in sandbox)
+- OpenAI adapter (works anywhere with OPENAI_API_KEY env var)
+- Template fallback (always works, no external dependency)
+- LLM_PROVIDER env var selects: "zai" | "openai" | "template" | "auto"
+- GameGenerationService tries provider, falls back to template on failure
+- App NEVER knows which provider it's using — fully decoupled
+
+### Feed Engine (TikTok for Games)
+- Created /api/feed endpoint — returns games for vertical feed
+  - Mixes builtin games + AI-generated games
+  - Shuffled for discovery
+  - Includes play counts, top scores, creator info
+- Created /feed page — TikTok-style vertical swipe interface
+  - Each card: game title, creator, plays, top score
+  - Social sidebar: like, comment, share buttons
+  - Play Now / Preview / Purchase buttons
+  - Swipe up/down or arrow keys to navigate
+  - Infinite scroll — loads more as you swipe
+  - Progress indicator on right side
+
+### Simplified Navigation
+- Player: Feed, Play, Wallet, Profile (was 7 items)
+- Creator: Feed, AI Studio, My Games, Revenue, Profile
+- Removed: Games catalog, Community, Rewards, Marketplace from nav
+- Login redirects to /feed
+
+### Verified Locally
+- Feed API returns 23 items ✅
+- Feed page renders with game cards, social buttons, play buttons ✅
+- AI generation uses Z.ai provider on sandbox (8,309 bytes) ✅
+- Provider abstraction correctly falls back to template ✅
+
+### Vercel Deployment
+- Token expired — needs new Vercel token to deploy
+- Code is pushed to GitHub: https://github.com/pectoraux/playliquid
+- All code works on sandbox (Preview Panel)
