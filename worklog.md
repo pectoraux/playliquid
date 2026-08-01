@@ -1095,3 +1095,51 @@ Stage Summary:
 - Now: 0 TS errors, all endpoints working, verified end-to-end on production
 - GitHub: https://github.com/pectoraux/playliquid
 - Vercel: https://my-project-dun-theta.vercel.app
+
+---
+Task ID: JOURNEY-COMPLETION
+Agent: main
+Task: Customer Journey Completion Audit — wire UI to real backend data
+
+## Problems Found
+1. All dashboard data was hardcoded static demo data (not from database)
+2. Profile save was a fake setTimeout (didn't persist)
+3. Wallet page showed hardcoded "12,500 GHS" (not real)
+4. Games page showed fake games (not from GameReadModel)
+5. Admin home showed hardcoded "12,480 users" (not real)
+6. Home pages crashed when real API returned different data shapes than expected
+
+## Fixes Applied
+1. Created `/api/dashboard` endpoint — returns real data from database for each role
+   - Player: real wallet balance, real leaderboard entries, real recent sessions
+   - Creator: real published games from GameReadModel
+   - Admin: real user counts, waitlist counts, game counts from database
+   - Finance: real wallet totals
+   - Operations: real event/outbox counts
+2. Created `/api/games` endpoint — returns real published games from GameReadModel
+3. Home page now fetches from `/api/dashboard` instead of `/api/demo-data`
+4. Profile save now POSTs to `/api/commands` (UpdateProfile command) — real persistence
+5. Wallet page rewritten to fetch real balance from database
+6. Games page rewritten to fetch real game catalog from database
+7. Admin home shows real counts (totalUsers, pendingWaitlist) instead of hardcoded numbers
+8. Added null guards to ALL data accesses in home page — no crashes on empty data
+9. Added empty states: "No games available", "No rewards yet", "No active daily challenge"
+
+## Verification on Production (https://my-project-dun-theta.vercel.app)
+- Player demo login → home shows real wallet (0 GHS), real leaderboard, real game catalog ✅
+- Creator demo login → home shows real published games, real analytics ✅
+- Moderator demo login → home loads without crash ✅
+- Support demo login → home loads without crash ✅
+- Finance demo login → home loads without crash ✅
+- Operations demo login → home loads without crash ✅
+- Developer demo login → home loads without crash ✅
+- Admin login (ekontetevi@gmail) → admin workspace with real user counts ✅
+- Games catalog shows 4 real published games from database ✅
+- Wallet page shows real balance (0 GHS) with proper empty state ✅
+- All stats backed by real database queries — no placeholder numbers ✅
+
+Stage Summary:
+- Every stat on the dashboard is now backed by real database data
+- Profile save persists to the backend via the CQRS command bus
+- All 7 demo roles + admin land on their home page without crashing
+- All empty states explain why they're empty and provide next actions
