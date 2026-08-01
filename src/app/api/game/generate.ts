@@ -45,29 +45,6 @@ export async function POST_generate(req: Request) {
 
   // Generate the game using GLM 5.2
   try {
-    // Load config from file or environment variables
-    const fs = await import('fs');
-    const path = await import('path');
-    const ZAIModule = await import('z-ai-web-dev-sdk');
-    const ZAI = ZAIModule.default;
-
-    let zai: { chat: { completions: { create: (params: unknown) => Promise<unknown> } } };
-
-    // Try file-based config first (works in local dev)
-    try {
-      zai = await ZAI.create();
-    } catch {
-      // Fallback: construct ZAI directly with config from env vars (works on Vercel)
-      const config = {
-        baseUrl: process.env.ZAI_BASE_URL || 'https://internal-api.z.ai/v1',
-        apiKey: process.env.ZAI_API_KEY || 'Z.ai',
-        token: process.env.ZAI_TOKEN || '',
-        chatId: process.env.ZAI_CHAT_ID || '',
-        userId: process.env.ZAI_USER_ID || '',
-      };
-      zai = new ZAI(config) as typeof zai;
-    }
-
     const systemPrompt = `You are an expert HTML5 game developer. Create complete, self-contained HTML5 games in a single HTML file with embedded CSS and JavaScript.
 
 Rules:
@@ -86,15 +63,58 @@ Rules:
 
 Game type: ${prompt}`;
 
-    const completion = await zai.chat.completions.create({
-      messages: [
-        { role: 'assistant', content: systemPrompt },
-        { role: 'user', content: `Create a game: ${prompt}. Title: ${title || prompt.slice(0, 30)}` },
-      ],
-      thinking: { type: 'disabled' },
-    });
+    // Try SDK first (works in sandbox/local dev)
+    let gameHtml = '';
+    try {
+      const ZAIModule = await import('z-ai-web-dev-sdk');
+      const ZAI = ZAIModule.default;
+      let zai: { chat: { completions: { create: (params: unknown) => Promise<{ choices: Array<{ message: { content: string } }> }> } } };
 
-    const gameHtml = completion.choices[0]?.message?.content || '';
+      try {
+        zai = await ZAI.create() as typeof zai;
+      } catch {
+        const config = {
+          baseUrl: process.env.ZAI_BASE_URL || 'https://internal-api.z.ai/v1',
+          apiKey: process.env.ZAI_API_KEY || 'Z.ai',
+          token: process.env.ZAI_TOKEN || '',
+          chatId: process.env.ZAI_CHAT_ID || '',
+          userId: process.env.ZAI_USER_ID || '',
+        };
+        zai = new ZAI(config) as typeof zai;
+      }
+
+      const completion = await zai.chat.completions.create({
+        messages: [
+          { role: 'assistant', content: systemPrompt },
+          { role: 'user', content: `Create a game: ${prompt}. Title: ${title || prompt.slice(0, 30)}` },
+        ],
+        thinking: { type: 'disabled' },
+      });
+
+      gameHtml = completion.choices[0]?.message?.content || '';
+    } catch (sdkError) {
+      // SDK not available (e.g., on Vercel without internal API access)
+      // Fall back to CLI if available
+      const { execSync } = await import('child_process');
+      try {
+        const escapedPrompt = (title || prompt).replace(/'/g, "'\\''");
+        const escapedSystem = systemPrompt.replace(/'/g, "'\\''");
+        const result = execSync(
+          `z-ai chat -p 'Create a game: ${escapedPrompt}' -s '${escapedSystem}'`,
+          { timeout: 60000, encoding: 'utf-8', maxBuffer: 1024 * 1024 }
+        );
+        // Parse CLI output — it returns JSON
+        const parsed = JSON.parse(result);
+        gameHtml = parsed.choices?.[0]?.message?.content || '';
+      } catch (cliError) {
+        // Neither SDK nor CLI available — generate a simple template game
+        gameHtml = generateTemplateGame(title || prompt, prompt);
+      }
+    }
+
+    if (!gameHtml) {
+      gameHtml = generateTemplateGame(title || prompt, prompt);
+    }
 
     // Clean up: remove markdown code fences if present
     const cleanedHtml = gameHtml
@@ -225,4 +245,49 @@ export async function GET_content(req: Request) {
       'Cache-Control': 'public, max-age=3600',
     },
   });
+}
+
+// ─── Fallback Template Game Generator ──────────────────────────────────────
+
+function generateTemplateGame(title: string, description: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${title}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;overflow:hidden}
+#game{position:relative;width:100%;max-width:600px;height:400px;background:#1e293b;border-radius:12px;overflow:hidden;cursor:crosshair}
+.target{position:absolute;width:50px;height:50px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer;transition:transform 0.1s}
+.target:hover{transform:scale(1.1)}
+#score{font-size:2rem;font-weight:bold;margin-bottom:1rem}
+#timer{font-size:1.2rem;color:#06b6d4;margin-bottom:1rem}
+#gameOver{display:none;position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(15,23,42,0.95);flex-direction:column;align-items:center;justify-content:center;z-index:10}
+#gameOver h2{font-size:2rem;margin-bottom:1rem}
+#gameOver p{font-size:1.5rem;color:#10b981;margin-bottom:1rem}
+button{padding:10px 24px;background:#10b981;color:#0f172a;border:none;border-radius:8px;font-size:1rem;cursor:pointer;font-weight:bold}
+.info{margin-top:1rem;color:#64748b;font-size:0.9rem;text-align:center;max-width:400px;padding:0 1rem}
+</style>
+</head>
+<body>
+<div id="score">Score: 0</div>
+<div id="timer">30s</div>
+<div id="game">
+<div id="gameOver"><h2>Game Over!</h2><p id="finalScore">Score: 0</p><button onclick="restart()">Play Again</button></div>
+</div>
+<div class="info">${description}</div>
+<script>
+let score=0,timeLeft=30,playing=true,targets=[],timer,spawner;
+const game=document.getElementById('game'),scoreEl=document.getElementById('score'),timerEl=document.getElementById('timer'),gameOver=document.getElementById('gameOver'),finalScore=document.getElementById('finalScore');
+const colors=['#10b981','#06b6d4','#8b5cf6','#f59e0b','#ef4444'],emojis=['🎯','⭐','💎','🔥','⚡'];
+function spawn(){const t=document.createElement('div');t.className='target';const ci=Math.floor(Math.random()*colors.length);t.style.background=colors[ci];t.style.left=Math.random()*85+5+'%';t.style.top=Math.random()*75+10+'%';t.textContent=emojis[ci];t.onclick=()=>{if(!playing)return;score+=10;scoreEl.textContent='Score: '+score;t.remove();};game.appendChild(t);targets.push(t);setTimeout(()=>{if(t.parentNode)t.remove();},1500);}
+function start(){score=0;timeLeft=30;playing=true;scoreEl.textContent='Score: 0';timerEl.textContent='30s';gameOver.style.display='none';targets.forEach(t=>t.remove());targets=[];timer=setInterval(()=>{timeLeft--;timerEl.textContent=timeLeft+'s';if(timeLeft<=0)end();},1000);spawner=setInterval(spawn,700);setTimeout(spawn,200);}
+function end(){playing=false;clearInterval(timer);clearInterval(spawner);targets.forEach(t=>t.remove());finalScore.textContent='Score: '+score;gameOver.style.display='flex';window.parent.postMessage({type:'gameOver',score:score},'*');}
+function restart(){start();}
+start();
+</script>
+</body>
+</html>`;
 }
