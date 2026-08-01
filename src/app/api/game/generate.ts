@@ -63,8 +63,9 @@ Rules:
 
 Game type: ${prompt}`;
 
-    // Try SDK first (works in sandbox/local dev)
     let gameHtml = '';
+
+    // Step 1: Try the GLM SDK directly (works in sandbox/local dev where .z-ai-config exists)
     try {
       const ZAIModule = await import('z-ai-web-dev-sdk');
       const ZAI = ZAIModule.default;
@@ -93,25 +94,27 @@ Game type: ${prompt}`;
 
       gameHtml = completion.choices[0]?.message?.content || '';
     } catch (sdkError) {
-      // SDK not available (e.g., on Vercel without internal API access)
-      // Fall back to CLI if available
-      const { execSync } = await import('child_process');
-      try {
-        const escapedPrompt = (title || prompt).replace(/'/g, "'\\''");
-        const escapedSystem = systemPrompt.replace(/'/g, "'\\''");
-        const result = execSync(
-          `z-ai chat -p 'Create a game: ${escapedPrompt}' -s '${escapedSystem}'`,
-          { timeout: 60000, encoding: 'utf-8', maxBuffer: 1024 * 1024 }
-        );
-        // Parse CLI output — it returns JSON
-        const parsed = JSON.parse(result);
-        gameHtml = parsed.choices?.[0]?.message?.content || '';
-      } catch (cliError) {
-        // Neither SDK nor CLI available — generate a simple template game
-        gameHtml = generateTemplateGame(title || prompt, prompt);
+      // SDK failed — likely on Vercel where internal API is unreachable
+      // Step 2: Try proxying through the sandbox (if ZAI_PROXY_URL is set)
+      const proxyUrl = process.env.ZAI_PROXY_URL;
+      if (proxyUrl) {
+        try {
+          const proxyRes = await fetch(`${proxyUrl}/api/game/generate-internal`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, title: title || prompt.slice(0, 30), systemPrompt }),
+          });
+          if (proxyRes.ok) {
+            const proxyData = await proxyRes.json();
+            gameHtml = proxyData.gameHtml || '';
+          }
+        } catch (proxyErr) {
+          // Proxy also failed
+        }
       }
     }
 
+    // Step 3: If still no game HTML, use the template fallback
     if (!gameHtml) {
       gameHtml = generateTemplateGame(title || prompt, prompt);
     }
