@@ -323,23 +323,38 @@ export async function POST_deployGame(req: Request) {
   return NextResponse.json({ ok: true, data: { gameId, title, status: 'published', deployType } });
 }
 
-// ─── Get Leaderboard ───────────────────────────────────────────────────────
+// ─── Get Leaderboard (Dual: Global + Competitive) ─────────────────────────
 
 export async function GET_leaderboard(req: Request) {
   const url = new URL(req.url);
   const gameId = url.searchParams.get('gameId');
+  const type = url.searchParams.get('type') || 'global'; // 'global' | 'competitive'
 
   if (!gameId) {
     return NextResponse.json({ ok: false, error: 'gameId required' }, { status: 400 });
   }
 
+  // Global leaderboard: ALL scores (preview + paid)
+  // Competitive leaderboard: only scores from paid sessions (GameSession where isPreview=false)
   const entries = await db.leaderboardEntry.findMany({
     where: { gameId },
     orderBy: { score: 'desc' },
     take: 20,
   });
 
-  const ranked = entries.map((entry, index) => ({
+  // For competitive, filter to only players who have a paid GameSession for this game
+  let competitiveEntries = entries;
+  if (type === 'competitive') {
+    const paidSessions = await db.gameSession.findMany({
+      where: { gameId, isPreview: false },
+      select: { playerId: true },
+      distinct: ['playerId'],
+    });
+    const paidPlayerIds = new Set(paidSessions.map(s => s.playerId));
+    competitiveEntries = entries.filter(e => paidPlayerIds.has(e.playerId));
+  }
+
+  const ranked = competitiveEntries.map((entry, index) => ({
     rank: index + 1,
     playerId: entry.playerId,
     score: entry.score,

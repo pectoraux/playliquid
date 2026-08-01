@@ -2,11 +2,11 @@
 
 import { use } from 'react';
 import Link from 'next/link';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, ArrowLeft, Home, Trophy, Wallet, Clock, Zap, RotateCcw, TrendingUp, Eye, DollarSign } from 'lucide-react';
+import { Loader2, ArrowLeft, Home, Trophy, Wallet, Clock, Zap, RotateCcw, TrendingUp, Eye, DollarSign, Play as PlayIcon } from 'lucide-react';
 import { useSession } from '@/lib/auth/use-session';
 import { useToast } from '@/hooks/use-toast';
 
@@ -17,19 +17,18 @@ const GAMES: Record<string, { title: string; description: string }> = {
   'cosmic-puzzle': { title: 'Cosmic Puzzle', description: 'Match all cosmic pairs!' },
 };
 
-type GameState = 'checking' | 'chooseMode' | 'needPurchase' | 'playing' | 'gameOver';
+type GameState = 'checking' | 'playing' | 'gameOver';
 
 export default function GamePlayerPage({ params }: { params: Promise<{ gameId: string }> }) {
   const { gameId } = use(params);
   const { session } = useSession();
   const { toast } = useToast();
   const [gameState, setGameState] = useState<GameState>('checking');
-  const [sessionData, setSessionData] = useState<{ sessionId: string; minutesRemaining: number; walletBalance: number; walletCurrency: string } | null>(null);
+  const [sessionData, setSessionData] = useState<{ sessionId: string; minutesRemaining: number; walletBalance: number; walletCurrency: string; hasSession: boolean } | null>(null);
   const [score, setScore] = useState(0);
   const [reward, setReward] = useState(0);
   const [leaderboardUpdated, setLeaderboardUpdated] = useState(false);
-  const [purchasing, setPurchasing] = useState(false);
-  const [isPreview, setIsPreview] = useState(false);
+  const [isPaid, setIsPaid] = useState(false);
   const [gameTitle, setGameTitle] = useState(GAMES[gameId]?.title || gameId);
   const [gameDescription, setGameDescription] = useState(GAMES[gameId]?.description || 'Play this game');
 
@@ -38,18 +37,15 @@ export default function GamePlayerPage({ params }: { params: Promise<{ gameId: s
   useEffect(() => {
     if (!session) return;
     checkSessionStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
-  // Fetch game metadata from catalog if not builtin
   useEffect(() => {
     if (isBuiltin) return;
     fetch(`/api/games`).then(r => r.json()).then(d => {
       if (d.ok) {
         const game = d.data.find((g: { id: string }) => g.id === gameId);
-        if (game) {
-          setGameTitle(game.title);
-          setGameDescription('Play this game');
-        }
+        if (game) { setGameTitle(game.title); setGameDescription('Play this game'); }
       }
     }).catch(() => {});
   }, [gameId, isBuiltin]);
@@ -61,23 +57,26 @@ export default function GamePlayerPage({ params }: { params: Promise<{ gameId: s
       const data = await res.json();
       if (data.ok) {
         setSessionData(data.data);
+        // If user has a paid session, start in paid mode; otherwise start in preview (free)
+        // The GAME IS THE SAME — only difference is whether scores/rewards are submitted
         if (data.data.hasActiveSession && data.data.minutesRemaining > 0) {
-          setGameState('playing');
+          setIsPaid(true);
         } else {
-          // Show choose mode: preview (free) or purchase (paid with scores)
-          setGameState('chooseMode');
+          setIsPaid(false);
         }
+        setGameState('playing');
       } else {
-        setGameState('chooseMode');
+        setIsPaid(false);
+        setGameState('playing');
       }
     } catch {
-      setGameState('chooseMode');
+      setIsPaid(false);
+      setGameState('playing');
     }
   }
 
-  async function handlePurchase() {
+  async function handleEarn() {
     if (!session) return;
-    setPurchasing(true);
     try {
       const res = await fetch('/api/game/purchase-minutes', {
         method: 'POST',
@@ -91,53 +90,35 @@ export default function GamePlayerPage({ params }: { params: Promise<{ gameId: s
           minutesRemaining: data.data.minutesRemaining,
           walletBalance: data.data.walletBalance,
           walletCurrency: 'GHS',
+          hasSession: true,
         });
-        setIsPreview(false);
-        setGameState('playing');
-        toast({ title: 'Session purchased!', description: `5 minutes purchased. ${data.data.walletBalance} GHS remaining.` });
+        setIsPaid(true);
+        toast({ title: 'Now earning!', description: '5 minutes purchased. Your scores now count on the competitive leaderboard.' });
       } else {
-        if (data.code === 'INSUFFICIENT_BALANCE') {
-          toast({ title: 'Insufficient balance', description: 'Deposit funds to your wallet first.', variant: 'destructive' });
-        } else {
-          toast({ title: 'Purchase failed', description: data.error, variant: 'destructive' });
-        }
+        toast({ title: data.code === 'INSUFFICIENT_BALANCE' ? 'Need funds' : 'Purchase failed', description: data.error, variant: 'destructive' });
       }
-    } catch {
-      toast({ title: 'Network error', description: 'Could not reach server', variant: 'destructive' });
-    } finally {
-      setPurchasing(false);
-    }
-  }
-
-  function handlePreview() {
-    setIsPreview(true);
-    setGameState('playing');
-    toast({ title: 'Preview mode', description: 'Playing in preview mode. Scores will not be saved. Purchase minutes to compete on leaderboards.' });
+    } catch { toast({ title: 'Network error', variant: 'destructive' }); }
   }
 
   async function handleGameOver(finalScore: number) {
     setScore(finalScore);
 
-    // If preview mode, don't submit score
-    if (isPreview || !sessionData?.sessionId) {
-      setGameState('gameOver');
-      return;
+    // Only submit to leaderboard + give rewards if user has purchased minutes (paid mode)
+    if (isPaid && sessionData?.sessionId) {
+      try {
+        const res = await fetch('/api/game/end-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: sessionData.sessionId, score: finalScore }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          setReward(data.data.reward);
+          setLeaderboardUpdated(data.data.leaderboardUpdated);
+        }
+      } catch {}
     }
 
-    try {
-      const res = await fetch('/api/game/end-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: sessionData.sessionId, score: finalScore }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        setReward(data.data.reward);
-        setLeaderboardUpdated(data.data.leaderboardUpdated);
-      }
-    } catch {
-      // Score still recorded locally
-    }
     setGameState('gameOver');
   }
 
@@ -154,10 +135,10 @@ export default function GamePlayerPage({ params }: { params: Promise<{ gameId: s
       {/* Navigation */}
       <div className="flex items-center justify-between">
         <Button variant="ghost" size="sm" asChild className="text-zinc-400 hover:text-zinc-200">
-          <Link href="/play"><ArrowLeft className="mr-2 h-4 w-4" />Back to Games</Link>
+          <Link href="/feed"><ArrowLeft className="mr-2 h-4 w-4" />Back to Feed</Link>
         </Button>
         <Button variant="ghost" size="sm" asChild className="text-zinc-400 hover:text-zinc-200">
-          <Link href="/home"><Home className="mr-2 h-4 w-4" />Home</Link>
+          <Link href="/feed"><Home className="mr-2 h-4 w-4" />Discover</Link>
         </Button>
       </div>
 
@@ -165,65 +146,31 @@ export default function GamePlayerPage({ params }: { params: Promise<{ gameId: s
       <div>
         <h1 className="text-2xl font-bold text-zinc-100">{gameTitle}</h1>
         <p className="text-sm text-zinc-500">{gameDescription}</p>
-        {isPreview && <Badge className="mt-2 bg-amber-500/20 text-amber-300">Preview Mode</Badge>}
+        {isPaid ? (
+          <Badge className="mt-2 bg-emerald-500/20 text-emerald-300">
+            <Zap className="mr-1 h-3 w-3" /> Earning Mode — Scores count on competitive leaderboard
+          </Badge>
+        ) : (
+          <Badge className="mt-2 bg-cyan-500/20 text-cyan-300">
+            <Eye className="mr-1 h-3 w-3" /> Preview Mode — Upgrade to earn rewards
+          </Badge>
+        )}
       </div>
 
-      {/* Choose Mode: Preview or Purchase */}
-      {gameState === 'chooseMode' && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {/* Preview (Free) */}
-          <Card className="cursor-pointer border-white/5 bg-white/[0.02] transition hover:border-emerald-500/30" onClick={handlePreview}>
-            <CardContent className="p-6 text-center">
-              <Eye className="mx-auto h-10 w-10 text-cyan-400" />
-              <h2 className="mt-3 font-bold text-zinc-100">Preview (Free)</h2>
-              <p className="mt-1 text-sm text-zinc-500">Try the game without purchasing. Scores won't be saved.</p>
-              <Button className="mt-4 w-full bg-cyan-500 text-slate-950 hover:bg-cyan-400">
-                <Eye className="mr-2 h-4 w-4" /> Play Preview
+      {/* Earn upgrade banner (only in preview mode) */}
+      {!isPaid && gameState === 'playing' && (
+        <Card className="border-emerald-500/30 bg-emerald-500/[0.03]">
+          <CardContent className="flex items-center justify-between p-4">
+            <div>
+              <p className="text-sm font-medium text-zinc-100">Upgrade to Earning Mode</p>
+              <p className="text-xs text-zinc-500">50 GHS for 5 minutes · Score on competitive leaderboard · Earn rewards</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-zinc-400">{sessionData?.walletBalance ?? 0} GHS</span>
+              <Button onClick={handleEarn} size="sm" className="bg-emerald-500 text-slate-950 hover:bg-emerald-400">
+                <Zap className="mr-1 h-4 w-4" /> Earn
               </Button>
-            </CardContent>
-          </Card>
-
-          {/* Purchase (Paid) */}
-          <Card className="cursor-pointer border-white/5 bg-white/[0.02] transition hover:border-emerald-500/30">
-            <CardContent className="p-6 text-center">
-              <DollarSign className="mx-auto h-10 w-10 text-emerald-400" />
-              <h2 className="mt-3 font-bold text-zinc-100">Purchase Playtime</h2>
-              <p className="mt-1 text-sm text-zinc-500">5 minutes for 50 GHS. Scores saved to leaderboard.</p>
-              <div className="mt-4 flex justify-center gap-6 text-sm">
-                <div>
-                  <div className="font-bold text-emerald-400">{sessionData?.walletBalance ?? 0}</div>
-                  <div className="text-xs text-zinc-500">Wallet (GHS)</div>
-                </div>
-                <div>
-                  <div className="font-bold text-amber-400">50 GHS</div>
-                  <div className="text-xs text-zinc-500">Cost</div>
-                </div>
-              </div>
-              <Button
-                onClick={handlePurchase}
-                disabled={purchasing}
-                className="mt-4 w-full bg-emerald-500 text-slate-950 hover:bg-emerald-400"
-              >
-                {purchasing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Zap className="mr-2 h-4 w-4" />}
-                Purchase & Play
-              </Button>
-              {(sessionData?.walletBalance ?? 0) < 50 && (
-                <p className="mt-2 text-xs text-amber-400">
-                  <Link href="/wallet" className="underline">Deposit funds</Link> to your wallet.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Need Purchase (old state, redirect to chooseMode) */}
-      {gameState === 'needPurchase' && (
-        <Card className="border-white/5 bg-white/[0.02]">
-          <CardContent className="p-6 text-center">
-            <Button onClick={() => setGameState('chooseMode')} className="bg-emerald-500 text-slate-950 hover:bg-emerald-400">
-              Choose Mode
-            </Button>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -246,10 +193,10 @@ export default function GamePlayerPage({ params }: { params: Promise<{ gameId: s
             />
           </div>
           <Button
-            onClick={() => handleGameOver(isPreview ? 0 : (sessionData?.minutesRemaining ? 100 : 50))}
+            onClick={() => handleGameOver(isPaid ? 100 : 50)}
             className="bg-emerald-500 text-slate-950 hover:bg-emerald-400"
           >
-            End Game & {isPreview ? 'Exit' : 'Submit Score'}
+            End Game {isPaid && '& Submit Score'}
           </Button>
         </div>
       )}
@@ -265,30 +212,32 @@ export default function GamePlayerPage({ params }: { params: Promise<{ gameId: s
                 <div className="text-3xl font-bold text-emerald-400">{score}</div>
                 <div className="text-sm text-zinc-500">Final Score</div>
               </div>
-              {!isPreview && reward > 0 && (
+              {isPaid && reward > 0 && (
                 <div className="text-center">
                   <div className="text-3xl font-bold text-amber-400">+{reward}</div>
                   <div className="text-sm text-zinc-500">Reward (GHS)</div>
                 </div>
               )}
             </div>
-            {isPreview && (
-              <p className="mt-3 text-sm text-zinc-500">Preview mode — score not saved</p>
+            {!isPaid && (
+              <p className="mt-3 text-sm text-cyan-400">Score recorded on Global leaderboard. Upgrade to earn rewards and compete on Competitive leaderboard.</p>
             )}
-            {!isPreview && leaderboardUpdated && (
+            {isPaid && leaderboardUpdated && (
               <Badge className="mt-4 bg-emerald-500/20 text-emerald-300">
-                <TrendingUp className="mr-1 h-3 w-3" /> Leaderboard updated!
+                <TrendingUp className="mr-1 h-3 w-3" /> Competitive leaderboard updated!
               </Badge>
             )}
             <div className="mt-8 flex gap-3">
-              {!isPreview && <Button onClick={checkSessionStatus} className="bg-emerald-500 text-slate-950 hover:bg-emerald-400">
+              <Button onClick={checkSessionStatus} className={isPaid ? "bg-emerald-500 text-slate-950 hover:bg-emerald-400" : "bg-cyan-500 text-slate-950 hover:bg-cyan-400"}>
                 <RotateCcw className="mr-2 h-4 w-4" /> Play Again
-              </Button>}
-              {isPreview && <Button onClick={handlePreview} className="bg-cyan-500 text-slate-950 hover:bg-cyan-400">
-                <RotateCcw className="mr-2 h-4 w-4" /> Preview Again
-              </Button>}
+              </Button>
+              {!isPaid && (
+                <Button onClick={handleEarn} className="bg-emerald-500 text-slate-950 hover:bg-emerald-400">
+                  <Zap className="mr-2 h-4 w-4" /> Upgrade to Earn
+                </Button>
+              )}
               <Button asChild variant="outline" className="border-white/10">
-                <Link href="/play">Back to Games</Link>
+                <Link href="/feed">Back to Feed</Link>
               </Button>
             </div>
           </CardContent>
