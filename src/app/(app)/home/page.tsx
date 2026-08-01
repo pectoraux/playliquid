@@ -27,7 +27,7 @@ export default function HomePage() {
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
-    fetch(`/api/demo-data?role=${encodeURIComponent(role)}`)
+    fetch(`/api/dashboard?role=${encodeURIComponent(role)}&userId=${encodeURIComponent(session.userId)}`)
       .then((r) => r.json())
       .then((data: DemoResponse) => {
         if (cancelled) return;
@@ -158,7 +158,11 @@ import type {
 } from '@/lib/demo/demo-data';
 
 interface AdminData {
-  player: PlayerData; creator: CreatorData; finance: FinanceData; operations: OperationsData;
+  totalUsers: number; activeUsers: number; suspendedUsers: number;
+  pendingWaitlist: number; totalGames: number; publishedGames: number;
+  totalEvents: number; systemHealth: string;
+  finance?: { revenue: { total: number } };
+  operations?: { systemHealth: { status: string; uptime: string } };
 }
 interface DeveloperData {
   operations: OperationsData; systemHealth: OperationsData['systemHealth'];
@@ -857,10 +861,10 @@ function AdminHome({ data }: { data: AdminData }) {
   return (
     <div className="space-y-8">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Pending Waitlist" value={12} icon={Clock} sub="Awaiting review" />
-        <StatCard label="Total Users" value="12,480" icon={Users} sub="Active accounts" accent="cyan" />
-        <StatCard label="Total Revenue" value={data?.finance?.revenue.total.toLocaleString() || '—'} icon={DollarSign} sub="All time" />
-        <StatCard label="System Health" value={data?.operations?.systemHealth.status || 'Healthy'} icon={Activity} sub={data?.operations?.systemHealth.uptime || '99.97%'} accent="cyan" />
+        <StatCard label="Pending Waitlist" value={data?.pendingWaitlist ?? 0} icon={Clock} sub="Awaiting review" />
+        <StatCard label="Total Users" value={data?.totalUsers ?? 0} icon={Users} sub="Active accounts" accent="cyan" />
+        <StatCard label="Total Revenue" value={data?.finance?.revenue?.total?.toLocaleString() ?? '0'} icon={DollarSign} sub="All time" />
+        <StatCard label="System Health" value={data?.operations?.systemHealth?.status ?? data?.systemHealth ?? 'Healthy'} icon={Activity} sub={data?.operations?.systemHealth?.uptime ?? '99.97%'} accent="cyan" />
       </div>
 
       <div>

@@ -46,14 +46,34 @@ export default function ProfilePage() {
 
   if (!session) return null;
 
-  function handleSave(e: React.FormEvent) {
+  async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    // In a real app this would POST to an API endpoint.
-    setTimeout(() => {
+    try {
+      const res = await fetch('/api/commands', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          commandType: 'UpdateProfile',
+          payload: {
+            userId: session!.userId,
+            displayName,
+            timezone: session!.roles?.length ? 'UTC' : 'UTC',
+            locale: 'en',
+          },
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        toast({ title: 'Profile saved', description: 'Your changes have been recorded.' });
+      } else {
+        toast({ title: 'Save failed', description: data.error || 'Please try again', variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Network error', description: 'Could not reach server', variant: 'destructive' });
+    } finally {
       setSaving(false);
-      toast({ title: 'Profile saved', description: 'Your changes have been recorded.' });
-    }, 700);
+    }
   }
 
   return (
@@ -78,7 +98,7 @@ export default function ProfilePage() {
               </div>
             </div>
             <div className="flex flex-wrap gap-2 pb-2">
-              {session.roles.map((role) => (
+              {session!.roles.map((role) => (
                 <Badge
                   key={role}
                   variant="outline"
