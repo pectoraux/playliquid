@@ -1355,3 +1355,50 @@ Task: Strategic pivot — TikTok for AI-generated games
 - Token expired — needs new Vercel token to deploy
 - Code is pushed to GitHub: https://github.com/pectoraux/playliquid
 - All code works on sandbox (Preview Panel)
+
+---
+Task ID: FEED-ENGINE-V2
+Agent: main
+Task: Production AI providers + social layer + responsive feed UX
+
+## Built
+
+### Production AI Provider Architecture
+- LlmProviderPort interface with isAvailable() health check
+- ZaiProvider: works in Z.ai sandbox
+- OpenAIProvider: works ANYWHERE with LLM_API_KEY env var
+  - Supports OpenAI, DeepSeek, OpenRouter via LLM_BASE_URL + LLM_MODEL
+- TemplateProvider: always works (fallback)
+- GameGenerationService: tries providers in order, auto-failover
+- Config: LLM_PROVIDER=auto (default) | zai | openai | template
+
+### Social Layer (persistent)
+- Prisma models: GameLike, GameComment, UserFollow, UserMessage, GameSession
+- /api/social/like — like/unlike games (toggle, returns count + liked status)
+- /api/social/comments — list + post comments on games
+- /api/social/follow — follow/unfollow users (toggle, returns follower/following counts)
+- All data persists to Neon PostgreSQL
+
+### Responsive Feed UX
+- Immersive mode (mobile): fullscreen vertical swipe, one game at a time
+- Browse mode (desktop): 3-column layout — sidebar + feed + comments panel
+- View mode toggle (Smartphone/Monitor icons) saved to localStorage
+- Social sidebar on each card: like, comment, share
+- Comment overlay in immersive, side panel in browse mode
+- Follow button on creator info
+- Play/Preview/Purchase buttons with wallet balance
+- Keyboard navigation (arrow keys, J/K)
+
+### Verified Working
+- Feed API returns games ✅
+- Social APIs work (like toggles, follow toggles, comments persist) ✅
+- All 8 pages return 200 ✅
+- All 7 API endpoints return 200 ✅
+- 0 TypeScript errors, 0 lint errors ✅
+- Browser test: feed loads with social sidebar, follow button, play options ✅
+
+### Vercel Deployment
+- Token expired, needs new token
+- Code pushed to GitHub: https://github.com/pectoraux/playliquid
+- App fully functional on sandbox (Preview Panel)
+- For Vercel: set LLM_PROVIDER=openai and LLM_API_KEY for AI generation on production
