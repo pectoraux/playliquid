@@ -187,14 +187,22 @@ export default function GamePlayerPage({ params }: { params: Promise<{ gameId: s
       )}
 
       {gameState === 'playing' && !isBuiltin && (
-        <Card className="border-white/5 bg-white/[0.02]">
-          <CardContent className="flex flex-col items-center py-12 text-center">
-            <p className="text-zinc-400">This is a catalog game. Play it using the built-in game engine.</p>
-            <Button onClick={() => setGameState('needPurchase')} variant="outline" className="mt-4 border-white/10">
-              End Session
-            </Button>
-          </CardContent>
-        </Card>
+        <div className="space-y-4">
+          <div className="overflow-hidden rounded-2xl border border-white/10">
+            <iframe
+              src={`/api/game/content/${gameId}`}
+              className="aspect-video w-full"
+              title={gameTitle}
+              sandbox="allow-scripts"
+            />
+          </div>
+          <Button
+            onClick={() => handleGameOver(sessionData?.minutesRemaining ? 100 : 50)}
+            className="bg-emerald-500 text-slate-950 hover:bg-emerald-400"
+          >
+            End Game & Submit Score
+          </Button>
+        </div>
       )}
 
       {/* Game Over State */}

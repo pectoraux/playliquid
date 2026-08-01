@@ -130,6 +130,11 @@ model GameReadModel {
   publishedAt String?
   createdAt   String
   updatedAt   DateTime @updatedAt
+  gameContent String?
+  gameType    String   @default("builtin")
+  deployType  String?
+  description String?
+  fileSize    Int      @default(0)
 
   @@index([creatorId])
   @@index([status])
