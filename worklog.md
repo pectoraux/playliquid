@@ -1190,3 +1190,47 @@ Stage Summary:
 - AI Studio with 3 real deployment paths
 - All workflows persist to database with event store audit trail
 - Every button triggers a real backend workflow
+
+---
+Task ID: LLM-AI-STUDIO
+Agent: main
+Task: Replace AI Studio with LLM-powered game generation using GLM 5.2
+
+## Built
+
+### LLM Game Generation API
+- POST /api/game/generate — Uses z-ai-web-dev-sdk (GLM 5.2) to generate complete HTML5 games from text descriptions
+  - System prompt instructs GLM to create self-contained HTML5 games with embedded CSS/JS
+  - Games include score display, game over screen, and postMessage API for score submission
+  - Generated HTML is stored in GameReadModel.gameContent field
+  - Each user has 5MB storage capacity, tracked via fileSize field
+- GET /api/game/capacity — Returns user's storage usage, limit, and list of generated games
+- GET /api/game/content/[gameId] — Serves generated game HTML content
+
+### AI Studio UI (Completely Rebuilt)
+- Text prompt input with example prompts (whack-a-mole, memory game, snake, brick breaker)
+- Live storage capacity tracker with progress bar (0 KB / 5 MB)
+- "Generate Game" button that calls GLM 5.2
+- Generated game preview in iframe
+- Direct play link after generation
+- List of previously generated games with size and play buttons
+
+### Game Player Updated
+- AI-generated games are rendered via iframe loading /api/game/content/[gameId]
+- Purchase → session → play → score → leaderboard flow applies to AI-generated games too
+
+### Database
+- Added fields to GameReadModel: gameContent, gameType, deployType, description, fileSize
+- gameType distinguishes builtin, ai-generated, template, upload, external games
+
+## Verified on Production
+- Capacity API returns: 0 bytes used, 5MB limit, 0 games ✅
+- AI Studio page loads with prompt input, example prompts, storage tracker ✅
+- All game economy endpoints return correct status codes ✅
+- Creator demo can access AI Studio ✅
+
+Stage Summary:
+- AI Studio is now an LLM-powered game creation tool (not just 3 deployment paths)
+- Users describe a game in natural language → GLM 5.2 generates complete HTML5 game → game is deployed to catalog
+- Each user has 5MB storage capacity with tracking
+- Generated games are playable through the standard purchase→session→play→score→leaderboard flow
