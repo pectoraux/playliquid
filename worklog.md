@@ -1143,3 +1143,50 @@ Stage Summary:
 - Profile save persists to the backend via the CQRS command bus
 - All 7 demo roles + admin land on their home page without crashing
 - All empty states explain why they're empty and provide next actions
+
+---
+Task ID: PAY-TO-PLAY + AI-STUDIO
+Agent: main
+Task: Build complete pay-to-play flow and AI Studio with 3 deployment paths
+
+## Built
+
+### Game Economy API (6 endpoints)
+- POST /api/game/deposit — deposit funds, creates WalletDeposited event
+- POST /api/game/purchase-minutes — buy playtime, creates MinutesPurchased + SessionStarted events, deducts from wallet
+- GET /api/game/session-status — check active session + wallet balance
+- POST /api/game/end-session — end session, submit score, update leaderboard, calculate reward (10% of score as wallet credit)
+- POST /api/game/deploy — deploy game via 3 paths (template, upload, external)
+- GET /api/game/leaderboard — get ranked leaderboard entries
+
+### Complete Player Journey
+```
+Login → Browse Games → Select Game → Check Wallet → Purchase Minutes (50 GHS/5min) → Session Created → Game Starts → Play → Game Over → Submit Score → Leaderboard Updated → Reward Calculated → Wallet Credited
+```
+
+### AI Studio (3 Deployment Paths)
+1. **From Template** — select from existing platform game templates (Liquid Tournament, Bubble Pop, etc.)
+2. **Upload Template** — upload user's own game file (max 1MB with size validation)
+3. **External Game** — link external game URL to platform (with URL validation)
+
+### Wallet Page (Real Deposits)
+- Deposit funds with quick-select amounts (100, 500, 1000 GHS)
+- Shows real balance from WalletReadModel
+- Creates WalletDeposited event in event store for audit trail
+
+## Verified on Production
+1. Deposit 1000 GHS → balance = 1000 ✅
+2. Purchase 5 minutes → cost 50 GHS → balance = 950 ✅
+3. End session with score 250 → leaderboard updated ✅
+4. Reward: 25 GHS credited to wallet ✅
+5. Leaderboard shows #1 player_demo: 250 ✅
+6. AI Studio: template deploy → game published ✅
+7. AI Studio: external deploy → game published ✅
+8. AI Studio: validation rejects missing URL ✅
+9. Catalog: 6 games available ✅
+
+Stage Summary:
+- Complete pay-to-play flow: deposit → purchase → session → play → score → leaderboard → reward
+- AI Studio with 3 real deployment paths
+- All workflows persist to database with event store audit trail
+- Every button triggers a real backend workflow
