@@ -45,25 +45,28 @@ export async function POST_generate(req: Request) {
 
   // Generate the game using GLM 5.2
   try {
-    // Ensure z-ai config file exists (needed by the SDK)
+    // Load config from file or environment variables
     const fs = await import('fs');
     const path = await import('path');
-    const configPath = path.join(process.cwd(), '.z-ai-config');
-    if (!fs.existsSync(configPath)) {
-      // Try to create from environment variables
-      const baseUrl = process.env.ZAI_BASE_URL || 'https://internal-api.z.ai/v1';
-      const apiKey = process.env.ZAI_API_KEY || 'Z.ai';
-      const token = process.env.ZAI_TOKEN || '';
-      const chatId = process.env.ZAI_CHAT_ID || '';
-      const zaiUserId = process.env.ZAI_USER_ID || '';
-      if (baseUrl && apiKey) {
-        const config = JSON.stringify({ baseUrl, apiKey, token, chatId, userId: zaiUserId });
-        fs.writeFileSync(configPath, config);
-      }
-    }
+    const ZAIModule = await import('z-ai-web-dev-sdk');
+    const ZAI = ZAIModule.default;
 
-    const ZAI = (await import('z-ai-web-dev-sdk')).default;
-    const zai = await ZAI.create();
+    let zai: { chat: { completions: { create: (params: unknown) => Promise<unknown> } } };
+
+    // Try file-based config first (works in local dev)
+    try {
+      zai = await ZAI.create();
+    } catch {
+      // Fallback: construct ZAI directly with config from env vars (works on Vercel)
+      const config = {
+        baseUrl: process.env.ZAI_BASE_URL || 'https://internal-api.z.ai/v1',
+        apiKey: process.env.ZAI_API_KEY || 'Z.ai',
+        token: process.env.ZAI_TOKEN || '',
+        chatId: process.env.ZAI_CHAT_ID || '',
+        userId: process.env.ZAI_USER_ID || '',
+      };
+      zai = new ZAI(config) as typeof zai;
+    }
 
     const systemPrompt = `You are an expert HTML5 game developer. Create complete, self-contained HTML5 games in a single HTML file with embedded CSS and JavaScript.
 
