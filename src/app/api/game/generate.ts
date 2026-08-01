@@ -45,6 +45,23 @@ export async function POST_generate(req: Request) {
 
   // Generate the game using GLM 5.2
   try {
+    // Ensure z-ai config file exists (needed by the SDK)
+    const fs = await import('fs');
+    const path = await import('path');
+    const configPath = path.join(process.cwd(), '.z-ai-config');
+    if (!fs.existsSync(configPath)) {
+      // Try to create from environment variables
+      const baseUrl = process.env.ZAI_BASE_URL || 'https://internal-api.z.ai/v1';
+      const apiKey = process.env.ZAI_API_KEY || 'Z.ai';
+      const token = process.env.ZAI_TOKEN || '';
+      const chatId = process.env.ZAI_CHAT_ID || '';
+      const zaiUserId = process.env.ZAI_USER_ID || '';
+      if (baseUrl && apiKey) {
+        const config = JSON.stringify({ baseUrl, apiKey, token, chatId, userId: zaiUserId });
+        fs.writeFileSync(configPath, config);
+      }
+    }
+
     const ZAI = (await import('z-ai-web-dev-sdk')).default;
     const zai = await ZAI.create();
 
