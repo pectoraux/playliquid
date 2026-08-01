@@ -239,7 +239,8 @@ export default function GamePlayerPage({ params }: { params: Promise<{ gameId: s
           <div className="overflow-hidden rounded-2xl border border-white/10">
             <iframe
               src={`/api/game/content/${gameId}`}
-              className="aspect-video w-full"
+              className="w-full"
+              style={{ height: '70vh', minHeight: '500px' }}
               title={gameTitle}
               sandbox="allow-scripts"
             />
