@@ -3,15 +3,20 @@
  * LLM Provider Abstraction
  *
  * The app never knows which AI provider it's talking to.
- * Z.ai is just one adapter. Later: OpenAI, Anthropic, Google, DeepSeek, etc.
+ * Z.ai is just one adapter. OpenAI/DeepSeek/OpenRouter work anywhere.
  *
  * Provider is selected via LLM_PROVIDER env var:
- *   "zai"    → Z.ai SDK (works in sandbox)
- *   "openai" → OpenAI API (works anywhere with OPENAI_API_KEY)
- *   "fallback" → Template generator (always works)
+ *   "zai"     → Z.ai SDK (works in sandbox)
+ *   "openai"  → OpenAI-compatible API (works anywhere with LLM_API_KEY)
+ *   "template" → Template generator (always works, no external dependency)
+ *   "auto"    → Try OpenAI first, then Z.ai, then template (default)
+ *
+ * For OpenAI-compatible providers (DeepSeek, OpenRouter, etc.):
+ *   LLM_PROVIDER=openai
+ *   LLM_API_KEY=sk-...
+ *   LLM_BASE_URL=https://api.deepseek.com/v1  (optional, defaults to OpenAI)
+ *   LLM_MODEL=deepseek-chat  (optional, defaults to gpt-4o-mini)
  */
-
-import { NextResponse } from 'next/server';
 
 export interface GameSpec {
   title: string;
@@ -25,13 +30,63 @@ export interface GameSpec {
 
 export interface LlmProviderPort {
   readonly name: string;
+  isAvailable(): Promise<boolean>;
   generateGame(prompt: string, title?: string): Promise<{ html: string; spec: GameSpec }>;
 }
 
-// ─── Z.ai Provider (works in sandbox) ───────────────────────────────────────
+// ─── Game Generation Prompt ────────────────────────────────────────────────
+
+function buildSystemPrompt(prompt: string): string {
+  return `You are an expert HTML5 game developer. Create complete, self-contained HTML5 games.
+
+Rules:
+1. Output ONLY valid HTML code — no markdown, no explanations, no code fences
+2. Self-contained in a single <html> document with inline CSS and JS
+3. Dark theme (background: #0f172a)
+4. Include score display and Game Over screen with final score
+5. Under 50KB, vanilla JS only, no external dependencies
+6. Responsive — must work on both desktop and mobile
+7. Call window.parent.postMessage({ type: 'gameOver', score: FINAL_SCORE }, '*') when game ends
+8. Start the game automatically when the page loads
+9. Make it genuinely fun and matching the description
+
+Game request: ${prompt}`;
+}
+
+function inferSpec(prompt: string, title?: string): GameSpec {
+  const lower = prompt.toLowerCase();
+  let gameType: GameSpec['gameType'] = 'casual';
+  if (/shoot|fight|race|run|jump|breakout|snake/.test(lower)) gameType = 'action';
+  else if (/puzzle|match|memory|connect|sudoku/.test(lower)) gameType = 'puzzle';
+  else if (/click|tap|pop|catch|whack/.test(lower)) gameType = 'arcade';
+  else if (/build|manage|plan|strategy/.test(lower)) gameType = 'strategy';
+
+  return {
+    title: title || prompt.slice(0, 50),
+    description: prompt,
+    gameType,
+    mechanics: [prompt],
+    winCondition: 'Get the highest score',
+    controls: 'Mouse, touch, or keyboard',
+    theme: 'dark',
+  };
+}
+
+// ─── Z.ai Provider (works in sandbox) ──────────────────────────────────────
 
 class ZaiProvider implements LlmProviderPort {
   readonly name = 'zai';
+
+  async isAvailable(): Promise<boolean> {
+    try {
+      const ZAIModule = await import('z-ai-web-dev-sdk');
+      const ZAI = ZAIModule.default;
+      await ZAI.create();
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   async generateGame(prompt: string, title?: string): Promise<{ html: string; spec: GameSpec }> {
     const ZAIModule = await import('z-ai-web-dev-sdk');
@@ -50,20 +105,7 @@ class ZaiProvider implements LlmProviderPort {
       }) as typeof zai;
     }
 
-    const systemPrompt = `You are an expert HTML5 game developer. Create complete, self-contained HTML5 games.
-
-Rules:
-1. Output ONLY valid HTML code — no markdown, no explanations
-2. Self-contained in a single <html> document with inline CSS and JS
-3. Dark theme (background: #0f172a)
-4. Include score display and Game Over screen
-5. Under 50KB, vanilla JS only
-6. Responsive for desktop and mobile
-7. Call window.parent.postMessage({ type: 'gameOver', score: FINAL_SCORE }, '*') when game ends
-8. Start automatically on page load
-
-Game request: ${prompt}`;
-
+    const systemPrompt = buildSystemPrompt(prompt);
     const completion = await zai.chat.completions.create({
       messages: [
         { role: 'assistant', content: systemPrompt },
@@ -73,30 +115,11 @@ Game request: ${prompt}`;
     });
 
     const html = completion.choices[0]?.message?.content || '';
-    return { html, spec: this.inferSpec(prompt, title) };
-  }
-
-  private inferSpec(prompt: string, title?: string): GameSpec {
-    const lower = prompt.toLowerCase();
-    let gameType: GameSpec['gameType'] = 'casual';
-    if (/shoot|fight|race|run|jump/.test(lower)) gameType = 'action';
-    else if (/puzzle|match|memory|connect/.test(lower)) gameType = 'puzzle';
-    else if (/click|tap|pop|catch/.test(lower)) gameType = 'arcade';
-    else if (/build|manage|plan/.test(lower)) gameType = 'strategy';
-
-    return {
-      title: title || prompt.slice(0, 50),
-      description: prompt,
-      gameType,
-      mechanics: [prompt],
-      winCondition: 'Get the highest score',
-      controls: 'Mouse or touch',
-      theme: 'dark',
-    };
+    return { html, spec: inferSpec(prompt, title) };
   }
 }
 
-// ─── OpenAI-compatible Provider (works anywhere) ───────────────────────────
+// ─── OpenAI-compatible Provider (works anywhere) ────────────────────────────
 
 class OpenAIProvider implements LlmProviderPort {
   readonly name = 'openai';
@@ -105,26 +128,17 @@ class OpenAIProvider implements LlmProviderPort {
   private model: string;
 
   constructor() {
-    this.apiKey = process.env.OPENAI_API_KEY || process.env.LLM_API_KEY || '';
+    this.apiKey = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
     this.baseUrl = process.env.LLM_BASE_URL || 'https://api.openai.com/v1';
     this.model = process.env.LLM_MODEL || 'gpt-4o-mini';
   }
 
+  async isAvailable(): Promise<boolean> {
+    return !!this.apiKey;
+  }
+
   async generateGame(prompt: string, title?: string): Promise<{ html: string; spec: GameSpec }> {
-    const systemPrompt = `You are an expert HTML5 game developer. Create complete, self-contained HTML5 games.
-
-Rules:
-1. Output ONLY valid HTML code — no markdown, no explanations
-2. Self-contained in a single <html> document with inline CSS and JS
-3. Dark theme (background: #0f172a)
-4. Include score display and Game Over screen
-5. Under 50KB, vanilla JS only
-6. Responsive for desktop and mobile
-7. Call window.parent.postMessage({ type: 'gameOver', score: FINAL_SCORE }, '*') when game ends
-8. Start automatically on page load
-
-Game request: ${prompt}`;
-
+    const systemPrompt = buildSystemPrompt(prompt);
     const res = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -138,55 +152,32 @@ Game request: ${prompt}`;
           { role: 'user', content: `Create: ${prompt}. Title: ${title || prompt.slice(0, 30)}` },
         ],
         max_tokens: 8000,
+        temperature: 0.7,
       }),
     });
 
-    if (!res.ok) throw new Error(`LLM API error: ${res.status}`);
+    if (!res.ok) {
+      const error = await res.text();
+      throw new Error(`LLM API error ${res.status}: ${error}`);
+    }
+
     const data = await res.json();
     const html = data.choices?.[0]?.message?.content || '';
-    return { html, spec: this.inferSpec(prompt, title) };
-  }
-
-  private inferSpec(prompt: string, title?: string): GameSpec {
-    const lower = prompt.toLowerCase();
-    let gameType: GameSpec['gameType'] = 'casual';
-    if (/shoot|fight|race|run|jump/.test(lower)) gameType = 'action';
-    else if (/puzzle|match|memory|connect/.test(lower)) gameType = 'puzzle';
-    else if (/click|tap|pop|catch/.test(lower)) gameType = 'arcade';
-    else if (/build|manage|plan/.test(lower)) gameType = 'strategy';
-
-    return {
-      title: title || prompt.slice(0, 50),
-      description: prompt,
-      gameType,
-      mechanics: [prompt],
-      winCondition: 'Get the highest score',
-      controls: 'Mouse or touch',
-      theme: 'dark',
-    };
+    return { html, spec: inferSpec(prompt, title) };
   }
 }
 
-// ─── Template Fallback Provider (always works) ─────────────────────────────
+// ─── Template Fallback Provider (always works) ──────────────────────────────
 
 class TemplateProvider implements LlmProviderPort {
   readonly name = 'template';
 
-  async generateGame(prompt: string, title?: string): Promise<{ html: string; spec: GameSpec }> {
-    const html = this.generateHtml(title || prompt, prompt);
-    return { html, spec: this.inferSpec(prompt, title) };
+  async isAvailable(): Promise<boolean> {
+    return true;
   }
 
-  private inferSpec(prompt: string, title?: string): GameSpec {
-    return {
-      title: title || prompt.slice(0, 50),
-      description: prompt,
-      gameType: 'arcade',
-      mechanics: ['click targets', 'score points', 'beat the timer'],
-      winCondition: 'Get the highest score before time runs out',
-      controls: 'Click or tap targets',
-      theme: 'dark',
-    };
+  async generateGame(prompt: string, title?: string): Promise<{ html: string; spec: GameSpec }> {
+    return { html: this.generateHtml(title || prompt, prompt), spec: inferSpec(prompt, title) };
   }
 
   private generateHtml(title: string, description: string): string {
@@ -233,57 +224,79 @@ start();
   }
 }
 
-// ─── Provider Factory ──────────────────────────────────────────────────────
+// ─── Provider Registry with Failover ───────────────────────────────────────
 
-let cachedProvider: LlmProviderPort | null = null;
+let cachedProviders: LlmProviderPort[] | null = null;
 
-export function getLlmProvider(): LlmProviderPort {
-  if (cachedProvider) return cachedProvider;
+function getProviders(): LlmProviderPort[] {
+  if (cachedProviders) return cachedProviders;
 
   const providerName = process.env.LLM_PROVIDER || 'auto';
+  const providers: LlmProviderPort[] = [];
 
   switch (providerName) {
     case 'zai':
-      cachedProvider = new ZaiProvider();
+      providers.push(new ZaiProvider());
+      providers.push(new TemplateProvider()); // fallback
       break;
     case 'openai':
-      cachedProvider = new OpenAIProvider();
+      providers.push(new OpenAIProvider());
+      providers.push(new TemplateProvider()); // fallback
       break;
     case 'template':
-      cachedProvider = new TemplateProvider();
+      providers.push(new TemplateProvider());
       break;
     case 'auto':
     default:
-      // Auto-detect: try Z.ai first, then OpenAI, then template
-      if (process.env.OPENAI_API_KEY || process.env.LLM_API_KEY) {
-        cachedProvider = new OpenAIProvider();
-      } else {
-        // Try Z.ai (works in sandbox)
-        cachedProvider = new ZaiProvider();
+      // Try OpenAI first (if configured), then Z.ai, then template
+      if (process.env.LLM_API_KEY || process.env.OPENAI_API_KEY) {
+        providers.push(new OpenAIProvider());
       }
+      providers.push(new ZaiProvider());
+      providers.push(new TemplateProvider()); // always last as fallback
       break;
   }
 
-  return cachedProvider;
+  cachedProviders = providers;
+  return providers;
 }
 
-// ─── Game Generation Service ──────────────────────────────────────────────
+// ─── Game Generation Service with Retry/Failover ──────────────────────────
 
 export class GameGenerationService {
-  constructor(private provider: LlmProviderPort = getLlmProvider()) {}
+  constructor(private providers: LlmProviderPort[] = getProviders()) {}
 
   async generate(prompt: string, title?: string): Promise<{ html: string; spec: GameSpec; provider: string }> {
-    try {
-      const result = await this.provider.generateGame(prompt, title);
-      if (result.html && result.html.length > 100) {
-        return { html: result.html, spec: result.spec, provider: this.provider.name };
+    let lastError: Error | null = null;
+
+    for (const provider of this.providers) {
+      try {
+        // Check if provider is available
+        const available = await provider.isAvailable();
+        if (!available) continue;
+
+        const result = await provider.generateGame(prompt, title);
+
+        // Validate result
+        if (result.html && result.html.length > 100) {
+          // Clean markdown fences
+          const cleaned = result.html
+            .replace(/^```html?\s*/i, '')
+            .replace(/^```\s*/i, '')
+            .replace(/\s*```$/i, '')
+            .trim();
+
+          if (cleaned.includes('<html') || cleaned.includes('<!DOCTYPE') || cleaned.includes('<body')) {
+            return { html: cleaned, spec: result.spec, provider: provider.name };
+          }
+        }
+      } catch (e) {
+        lastError = e as Error;
+        console.error(`Provider ${provider.name} failed:`, (e as Error).message);
       }
-      throw new Error('Empty response');
-    } catch (e) {
-      // Fall back to template provider
-      const fallback = new TemplateProvider();
-      const result = await fallback.generateGame(prompt, title);
-      return { html: result.html, spec: result.spec, provider: 'template' };
     }
+
+    // All providers failed — this should never happen since template always works
+    throw lastError || new Error('All providers failed');
   }
 }

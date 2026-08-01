@@ -581,3 +581,70 @@ model PerformanceMetric {
   @@index([timestamp])
 }
 
+
+// ─── Social: Likes, Comments, Follows ─────────────────────────────────────
+
+model GameLike {
+  id        String   @id @default(cuid())
+  gameId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  @@unique([gameId, userId])
+  @@index([userId])
+}
+
+model GameComment {
+  id        String   @id @default(cuid())
+  gameId    String
+  userId    String
+  content   String
+  parentId  String?
+  likes     Int      @default(0)
+  pinned    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([gameId, createdAt])
+  @@index([userId])
+  @@index([parentId])
+}
+
+model UserFollow {
+  id        String   @id @default(cuid())
+  followerId String
+  followingId String
+  createdAt DateTime @default(now())
+
+  @@unique([followerId, followingId])
+  @@index([followingId])
+}
+
+model UserMessage {
+  id        String   @id @default(cuid())
+  senderId  String
+  receiverId String
+  content   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([receiverId, read])
+  @@index([senderId])
+}
+
+model GameSession {
+  id        String   @id @default(cuid())
+  sessionId String   @unique
+  gameId    String
+  playerId  String
+  status    String   @default("active")
+  score     Int      @default(0)
+  reward    Int      @default(0)
+  isPreview Boolean  @default(false)
+  startedAt String
+  endedAt   String?
+  createdAt DateTime @default(now())
+
+  @@index([gameId, playerId])
+  @@index([playerId, status])
+}
