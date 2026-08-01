@@ -361,8 +361,8 @@ function CreatorHome({ data }: { data: CreatorData }) {
                       {g.status}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right tabular-nums text-zinc-300">{g.plays.toLocaleString()}</TableCell>
-                  <TableCell className="text-right tabular-nums text-emerald-300">{g.revenue.toLocaleString()}</TableCell>
+                  <TableCell className="text-right tabular-nums text-zinc-300">{(g.plays ?? 0).toLocaleString()}</TableCell>
+                  <TableCell className="text-right tabular-nums text-emerald-300">{(g.revenue ?? 0).toLocaleString()}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -550,8 +550,8 @@ function MarketplaceHome({ data }: { data: MarketplaceData }) {
               <TableRow key={g.id} className="border-white/5">
                 <TableCell className="font-medium text-zinc-100">{g.title}</TableCell>
                 <TableCell className="text-right tabular-nums text-zinc-300">{g.price}</TableCell>
-                <TableCell className="text-right tabular-nums text-zinc-300">{g.sales.toLocaleString()}</TableCell>
-                <TableCell className="text-right tabular-nums text-emerald-300">{(g.price * g.sales).toLocaleString()}</TableCell>
+                <TableCell className="text-right tabular-nums text-zinc-300">{(g.sales ?? 0).toLocaleString()}</TableCell>
+                <TableCell className="text-right tabular-nums text-emerald-300">{(g.price ?? 0) * (g.sales ?? 0).toLocaleString()}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -740,7 +740,7 @@ function FinanceHome({ data }: { data: FinanceData }) {
             {(data?.payoutQueue ?? []).map((p) => (
               <TableRow key={p.id} className="border-white/5">
                 <TableCell className="font-medium text-zinc-100">{p.payee}</TableCell>
-                <TableCell className="text-right tabular-nums text-emerald-300">{p.amount.toLocaleString()}</TableCell>
+                <TableCell className="text-right tabular-nums text-emerald-300">{(p.amount ?? 0).toLocaleString()}</TableCell>
                 <TableCell className="text-right">
                   <Badge variant="outline" className={p.status === 'Pending' ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' : 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300'}>
                     {p.status}
